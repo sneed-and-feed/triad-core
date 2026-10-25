@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0.0",
   "verifier": "Broadcom BCM2712 Cortex-A76 Hardware Cache Verifier (scripts/verify_bcm2712_arena.py)",
-  "timestamp_utc": "2026-10-25T10:31:01Z",
+  "timestamp_utc": "2026-10-25T18:36:02Z",
   "hardware_target": "Broadcom BCM2712 (Raspberry Pi 5)",
   "cpu_core": "ARM Cortex-A76 (ARMv8.2-A)",
   "bcm2712_cache_geometry": {
@@ -44,8 +44,8 @@
       "arena_max_ceiling_bytes": 1258291,
       "arena_alignment_bytes": 64,
       "total_references": 50000000,
-      "simulation_wall_time_sec": 1.4853,
-      "throughput_refs_per_sec": 33662578.0,
+      "simulation_wall_time_sec": 1.5158,
+      "throughput_refs_per_sec": 32986363.0,
       "l1d": {
         "hits": 29026562,
         "misses": 20973438,
@@ -66,7 +66,7 @@
       "target_achieved": true,
       "allocator_static_audit": {
         "audited": true,
-        "target_binary": "C:/Users/x/Documents/antigravity/triad-core/rust/triad_core_rs/target/release/triad_core_rs.dll",
+        "target_binary": "c:/Users/x/Documents/antigravity/triad-core/rust/triad_core_rs/target/release/triad_core_rs.dll",
         "heap_allocators_imported": [],
         "stepping_symbols_verified": [
           "skew_triad_step_f32",

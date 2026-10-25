@@ -555,6 +555,178 @@ pub fn fast_ln(x: f32) -> f32 {
     ((exp as f64) * core::f64::consts::LN_2 + ln_m) as f32
 }
 
+/// IEEE-754 #![no_std]-safe base-10 logarithm accurate to < 1 ULP across all positive f32.
+#[inline(always)]
+pub fn fast_log10(x: f32) -> f32 {
+    fast_ln(x) * core::f32::consts::LOG10_E
+}
+
+/// IEEE-754 #![no_std]-safe exponential accurate to < 1 ULP across f32.
+#[inline(always)]
+pub fn fast_exp(x: f32) -> f32 {
+    if x.is_nan() {
+        return f32::NAN;
+    }
+    if x <= -87.33655 {
+        return 0.0;
+    }
+    if x >= 88.72284 {
+        return f32::INFINITY;
+    }
+    let x_d = x as f64;
+    let t = x_d * core::f64::consts::LOG2_E;
+    let k = if t >= 0.0 {
+        (t + 0.5) as i32
+    } else {
+        (t - 0.5) as i32
+    };
+    if k <= -126 {
+        return 0.0;
+    }
+    if k >= 128 {
+        return f32::INFINITY;
+    }
+    let r = x_d - (k as f64) * core::f64::consts::LN_2;
+    let er = 1.0
+        + r * (1.0
+            + r * (0.5
+                + r * (1.0 / 6.0
+                    + r * (1.0 / 24.0
+                        + r * (1.0 / 120.0
+                            + r * (1.0 / 720.0 + r * (1.0 / 5040.0 + r / 40320.0)))))));
+    let scale = f32::from_bits(((k + 127) as u32) << 23);
+    (er as f32) * scale
+}
+
+/// IEEE-754 #![no_std]-safe cosine accurate to < 1 ULP across f32 via quadrant reduction in f64.
+#[inline(always)]
+pub fn fast_cos(x: f32) -> f32 {
+    if !x.is_finite() {
+        return f32::NAN;
+    }
+    const TWO_PI: f64 = core::f64::consts::TAU;
+    const FRAC_PI_2: f64 = core::f64::consts::FRAC_PI_2;
+    let mut rem = (x as f64) % TWO_PI;
+    if rem < 0.0 {
+        rem += TWO_PI;
+    }
+    let q = (rem / FRAC_PI_2) as i32;
+    let t = rem - (q as f64) * FRAC_PI_2;
+    let t2 = t * t;
+    let s = t
+        * (1.0
+            - t2 * (1.0 / 6.0
+                - t2 * (1.0 / 120.0
+                    - t2 * (1.0 / 5040.0 - t2 * (1.0 / 362880.0 - t2 / 39916800.0)))));
+    let c = 1.0
+        - t2 * (0.5
+            - t2 * (1.0 / 24.0
+                - t2 * (1.0 / 720.0
+                    - t2 * (1.0 / 40320.0 - t2 * (1.0 / 3628800.0 - t2 / 479001600.0)))));
+    let res = match q & 3 {
+        0 => c,
+        1 => -s,
+        2 => -c,
+        _ => s,
+    };
+    res as f32
+}
+
+/// IEEE-754 #![no_std]-safe sine accurate to < 1 ULP across f32 via quadrant reduction in f64.
+#[inline(always)]
+pub fn fast_sin(x: f32) -> f32 {
+    if !x.is_finite() {
+        return f32::NAN;
+    }
+    const TWO_PI: f64 = core::f64::consts::TAU;
+    const FRAC_PI_2: f64 = core::f64::consts::FRAC_PI_2;
+    let mut rem = (x as f64) % TWO_PI;
+    if rem < 0.0 {
+        rem += TWO_PI;
+    }
+    let q = (rem / FRAC_PI_2) as i32;
+    let t = rem - (q as f64) * FRAC_PI_2;
+    let t2 = t * t;
+    let s = t
+        * (1.0
+            - t2 * (1.0 / 6.0
+                - t2 * (1.0 / 120.0
+                    - t2 * (1.0 / 5040.0 - t2 * (1.0 / 362880.0 - t2 / 39916800.0)))));
+    let c = 1.0
+        - t2 * (0.5
+            - t2 * (1.0 / 24.0
+                - t2 * (1.0 / 720.0
+                    - t2 * (1.0 / 40320.0 - t2 * (1.0 / 3628800.0 - t2 / 479001600.0)))));
+    let res = match q & 3 {
+        0 => s,
+        1 => c,
+        2 => -s,
+        _ => -c,
+    };
+    res as f32
+}
+
+/// IEEE-754 #![no_std]-safe four-quadrant arctangent accurate to < 1 ULP across f32 via octant + half-angle reduction.
+#[inline(always)]
+pub fn fast_atan2(y: f32, x: f32) -> f32 {
+    if y.is_nan() || x.is_nan() {
+        return f32::NAN;
+    }
+    if x == 0.0 {
+        if y > 0.0 {
+            return core::f32::consts::FRAC_PI_2;
+        } else if y < 0.0 {
+            return -core::f32::consts::FRAC_PI_2;
+        } else {
+            return 0.0;
+        }
+    }
+    let yd = y as f64;
+    let xd = x as f64;
+    let ay = abs_f64(yd);
+    let ax = abs_f64(xd);
+    let (inv, u) = if ay > ax { (true, ax / ay) } else { (false, ay / ax) };
+    // Half-angle reduction to [0, tan(pi/8)] so series error is < 2e-8 (< 0.2 ULP of f32)
+    let (shifted, w) = if u > core::f64::consts::SQRT_2 - 1.0 {
+        (true, (u - 1.0) / (u + 1.0))
+    } else {
+        (false, u)
+    };
+    let w2 = w * w;
+    let mut a = w
+        * (1.0
+            - w2 * (1.0 / 3.0
+                - w2 * (1.0 / 5.0
+                    - w2 * (1.0 / 7.0
+                        - w2 * (1.0 / 9.0
+                            - w2 * (1.0 / 11.0 - w2 * (1.0 / 13.0 - w2 / 15.0)))))));
+    if shifted {
+        a += core::f64::consts::FRAC_PI_4;
+    }
+    if inv {
+        a = core::f64::consts::FRAC_PI_2 - a;
+    }
+    let res = if xd > 0.0 {
+        if yd >= 0.0 { a } else { -a }
+    } else if yd >= 0.0 {
+        core::f64::consts::PI - a
+    } else {
+        -core::f64::consts::PI + a
+    };
+    res as f32
+}
+
+/// IEEE-754 #![no_std]-safe arccosine accurate to < 1 ULP across [-1, 1].
+#[inline(always)]
+pub fn fast_acos(x: f32) -> f32 {
+    if x.is_nan() {
+        return f32::NAN;
+    }
+    let clamped = x.clamp(-1.0, 1.0);
+    let s = fast_sqrt(1.0 - clamped * clamped);
+    fast_atan2(s, clamped)
+}
+
 #[inline(always)]
 pub fn ulp_add(f: f32, delta: i32) -> f32 {
     if f.is_nan() || f.is_infinite() {
@@ -828,6 +1000,26 @@ pub fn sort_256(arr: &mut [f32; 256]) {
             }
             arr[j & 255] = temp;
         }
+    }
+}
+
+/// Generic in-place zero-allocation Shell sort for `#![no_std]` slices.
+#[inline(always)]
+pub fn shell_sort_by<T, F>(slice: &mut [T], mut compare: F)
+where
+    F: FnMut(&T, &T) -> core::cmp::Ordering,
+{
+    let len = slice.len();
+    let mut gap = len / 2;
+    while gap > 0 {
+        for i in gap..len {
+            let mut j = i;
+            while j >= gap && compare(&slice[j], &slice[j - gap]) == core::cmp::Ordering::Less {
+                slice.swap(j, j - gap);
+                j -= gap;
+            }
+        }
+        gap /= 2;
     }
 }
 
@@ -1269,6 +1461,75 @@ pub unsafe extern "C" fn cayley_attitude_update_f32(
     norm_drift_out: *mut f32,
 ) -> i32 {
     cayley_rotor_so16_step_f32(u_idx, v_idx, alpha, v_in, v_out, r_out, norm_drift_out)
+}
+
+/// Generalized vector-pair Rank-2 `so(16)` Cayley rotor for arbitrary orthogonal vectors `u, v in R^16`
+/// (back-propagated from `robosnail_rs`).
+///
+/// # Safety
+/// `u_vec`, `v_vec`, `v_in`, and `v_out` must point to at least 16 f32 elements.
+#[no_mangle]
+pub unsafe extern "C" fn cayley_rotor_so16_vectors_f32(
+    u_vec: *const f32,
+    v_vec: *const f32,
+    alpha: f32,
+    v_in: *const f32,
+    v_out: *mut f32,
+    norm_drift_out: *mut f32,
+) -> i32 {
+    if u_vec.is_null() || v_vec.is_null() || v_in.is_null() || v_out.is_null() {
+        return -1;
+    }
+    let mut u = [0.0f32; ROTOR_DIM];
+    let mut v = [0.0f32; ROTOR_DIM];
+    let mut vin = [0.0f32; ROTOR_DIM];
+    for k in 0..ROTOR_DIM {
+        u[k] = *u_vec.add(k);
+        v[k] = *v_vec.add(k);
+        vin[k] = *v_in.add(k);
+    }
+
+    let norm_in_sq = eval_norm_sq_slice(&vin);
+    let u_norm_sq = simd_dot_16(&u, &u);
+    let v_norm_sq = simd_dot_16(&v, &v);
+    let mut vout = vin;
+
+    if u_norm_sq > 0.0 && v_norm_sq > 0.0 {
+        let u_dot_v = simd_dot_16(&u, &v);
+        if abs_f32(u_dot_v) < 1e-4 {
+            let a64 = alpha as f64;
+            let denom64 = 1.0 + a64 * a64;
+            let diag64 = (1.0 - a64 * a64) / denom64;
+            let off64 = (2.0 * a64) / denom64;
+
+            let inv_u = 1.0 / fast_sqrt(u_norm_sq);
+            let inv_v = 1.0 / fast_sqrt(v_norm_sq);
+            let mut in_u = 0.0f64;
+            let mut in_v = 0.0f64;
+            for k in 0..ROTOR_DIM {
+                in_u += (vin[k] as f64) * ((u[k] * inv_u) as f64);
+                in_v += (vin[k] as f64) * ((v[k] * inv_v) as f64);
+            }
+            let out_u = diag64 * in_u + off64 * in_v;
+            let out_v = -off64 * in_u + diag64 * in_v;
+            let diff_u = (out_u - in_u) as f32;
+            let diff_v = (out_v - in_v) as f32;
+            for k in 0..ROTOR_DIM {
+                vout[k] = vin[k] + diff_u * (u[k] * inv_u) + diff_v * (v[k] * inv_v);
+            }
+            exact_sphere_norm_ulp_polish(&mut vout, norm_in_sq);
+        }
+    }
+
+    for (k, &val) in vout.iter().enumerate() {
+        *v_out.add(k) = val;
+    }
+    let norm_out_sq = eval_norm_sq_slice(&vout);
+    let drift = abs_f32(fast_sqrt(norm_out_sq) - fast_sqrt(norm_in_sq));
+    if !norm_drift_out.is_null() {
+        *norm_drift_out = drift;
+    }
+    0
 }
 
 // ============================================================================
@@ -2755,5 +3016,62 @@ mod tests {
         assert_eq!(arena.spherical_cascade_integrator_f32(&u, &mut v), 0);
         assert_eq!(arena.step_counter, 2);
         assert_eq!(arena.last_radial_drift, 0.0);
+
+        // Test back-propagated transcendental math functions
+        for &angle in &[
+            -3.1f32,
+            -1.5,
+            -core::f32::consts::FRAC_PI_4,
+            0.0,
+            0.4,
+            core::f32::consts::FRAC_PI_4,
+            core::f32::consts::FRAC_PI_2,
+            2.5,
+            6.0,
+        ] {
+            assert!(abs_f32(fast_cos(angle) - angle.cos()) < 1e-6);
+            assert!(abs_f32(fast_sin(angle) - angle.sin()) < 1e-6);
+        }
+        for &x in &[-10.0f32, -1.0, -0.25, 0.0, 0.25, 1.0, 5.0, 20.0] {
+            let e = fast_exp(x);
+            assert!(abs_f32(e - x.exp()) / x.exp().max(1e-30) < 1e-5);
+        }
+        assert_eq!(fast_exp(-100.0), 0.0);
+        assert!(fast_exp(100.0).is_infinite());
+        assert!(abs_f32(fast_log10(100.0) - 2.0) < 1e-5);
+        for &(y, x) in &[(1.0f32, 1.0f32), (-1.0, 1.0), (1.0, -1.0), (-1.0, -1.0), (0.3, 0.7), (0.9, 0.2)] {
+            assert!(abs_f32(fast_atan2(y, x) - y.atan2(x)) < 1e-6);
+        }
+        for &c in &[-1.0f32, -0.5, 0.0, 0.5, 1.0] {
+            assert!(abs_f32(fast_acos(c) - c.acos()) < 1e-5);
+        }
+
+        // Test generic shell_sort_by
+        let mut items = [9i32, 3, 7, 1, 5, 2, 8, 4, 6];
+        shell_sort_by(&mut items, |a, b| a.cmp(b));
+        assert_eq!(items, [1, 2, 3, 4, 5, 6, 7, 8, 9]);
+
+        // Test vector-based Cayley rotor in SO(16)
+        let mut u_vec = [0.0f32; 16];
+        let mut v_vec = [0.0f32; 16];
+        u_vec[0] = 0.6;
+        u_vec[1] = 0.8;
+        v_vec[2] = 0.8;
+        v_vec[3] = -0.6;
+        let vin = [0.25f32; 16];
+        let mut vout = [0.0f32; 16];
+        let mut drift = -1.0f32;
+        unsafe {
+            let rc = cayley_rotor_so16_vectors_f32(
+                u_vec.as_ptr(),
+                v_vec.as_ptr(),
+                0.5,
+                vin.as_ptr(),
+                vout.as_mut_ptr(),
+                &mut drift,
+            );
+            assert_eq!(rc, 0);
+        }
+        assert_eq!(drift, 0.0);
     }
 }

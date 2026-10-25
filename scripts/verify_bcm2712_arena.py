@@ -130,7 +130,7 @@ struct CacheLevel<const SETS: usize, const WAYS: usize> {
 }
 
 impl<const SETS: usize, const WAYS: usize> CacheLevel<SETS, WAYS> {
-    fn new() -> Self {
+    const fn new() -> Self {
         Self {
             tags: [[-1; WAYS]; SETS],
             lru: [[0; WAYS]; SETS],
@@ -138,6 +138,18 @@ impl<const SETS: usize, const WAYS: usize> CacheLevel<SETS, WAYS> {
             hits: 0,
             misses: 0,
         }
+    }
+
+        fn reset(&mut self) {
+        for s in 0..SETS {
+            for w in 0..WAYS {
+                self.tags[s][w] = -1;
+                self.lru[s][w] = 0;
+            }
+        }
+        self.tick = 0;
+        self.hits = 0;
+        self.misses = 0;
     }
 
     #[inline(always)]
@@ -180,13 +192,20 @@ pub struct Bcm2712Hierarchy {
 }
 
 impl Bcm2712Hierarchy {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             l1d: CacheLevel::new(),
             l2: CacheLevel::new(),
             l3: CacheLevel::new(),
             total_refs: 0,
         }
+    }
+
+    pub fn reset(&mut self) {
+        self.l1d.reset();
+        self.l2.reset();
+        self.l3.reset();
+        self.total_refs = 0;
     }
 
     #[inline(always)]
@@ -219,6 +238,8 @@ impl Bcm2712Hierarchy {
     }
 }
 
+static mut GLOBAL_HIER: Bcm2712Hierarchy = Bcm2712Hierarchy::new();
+
 struct Rng(u64);
 impl Rng {
     fn new(seed: u64) -> Self { Self(seed.max(1)) }
@@ -242,7 +263,8 @@ pub unsafe extern "C" fn simulate_triad_arena_workload(
         return -1;
     }
 
-    let mut hier = Bcm2712Hierarchy::new();
+    let hier = &mut *core::ptr::addr_of_mut!(GLOBAL_HIER);
+    hier.reset();
     let mut rng = Rng::new(20261025);
     let mut addr: u64 = 0;
 
