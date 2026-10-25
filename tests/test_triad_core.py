@@ -25,10 +25,7 @@ from __future__ import annotations
 
 import json
 import math
-import os
-import sys
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
 
 import numpy as np
 import pytest
@@ -51,12 +48,6 @@ try:
         is_native_available,
         load_native_library,
         verify_native_parity,
-        skew_triad_step,
-        slow_fast_cascade_k16,
-        cayley_rotor_so16_step,
-        beltrami_morse_gate,
-        kelvin_mandel_so6_rotor,
-        contact_sheaf_se2_step,
     )
     NATIVE_AVAILABLE = is_native_available()
 except Exception:
@@ -464,3 +455,140 @@ class TestSixVerticalWorkloads:
         assert res["passed"] is True
         assert res["pointwise_flux_tangency_residual"] <= 1.0e-8
         assert res["radial_flux_escape"] == 0.0
+
+
+# ==============================================================================
+# Suite 6: Edge Cases, Boundary Inputs & Stealth Integration Snippets
+# ==============================================================================
+
+class TestEdgeCasesAndStealthIntegration:
+    """Tests boundary inputs, 64D triad steps, W=None parity, and documented stealth workflows."""
+
+    def test_stealth_integration_workflow_64d(self):
+        """Verifies the 64D stealth domain-native workflow from README.md & STEALTH_INTEGRATION_GUIDE.md."""
+        from triad_core.operators import TriadCoreEngine
+
+        engine = TriadCoreEngine()
+        dim = 64
+        u = np.full(dim, 1.0 / np.sqrt(dim), dtype=np.float32)
+        v = np.zeros(dim, dtype=np.float32)
+        v[0] = 1.0
+
+        v_step = engine.so_skew_tiebreaker(u, v, dt=0.016)
+        assert abs(np.linalg.norm(v_step) - 1.0) <= 1e-7
+
+        v_retracted = engine.spherical_cascade_integrator(u, v_step)
+        assert abs(np.linalg.norm(v_retracted) - 1.0) <= 1e-7
+
+        if NATIVE_AVAILABLE:
+            from triad_core._native import skew_triad_step as nat_skew_step
+            nat_v_step = nat_skew_step(u, v, None, dt=0.016)
+            assert abs(np.linalg.norm(nat_v_step) - 1.0) <= 1e-7
+            assert np.max(np.abs(nat_v_step - v_step)) <= 1e-6
+
+    def test_zero_vector_and_empty_boundary_handling(self):
+        """Verifies graceful handling of zero vectors, empty salience arrays, and degenerate graphs."""
+        from triad_core.operators import (
+            TriadCoreEngine,
+            compute_spatial_mad_floor_256 as py_mad_floor,
+            beltrami_morse_gate as py_morse_gate,
+            contact_sheaf_se2_step as py_contact_step,
+        )
+
+        engine = TriadCoreEngine()
+        u_zero = np.zeros(16, dtype=np.float32)
+        v_zero = np.zeros(16, dtype=np.float32)
+
+        out_zero = engine.skew_triad_step(u_zero, v_zero)
+        assert np.all(out_zero == 0.0)
+
+        assert py_mad_floor(np.array([], dtype=np.float32)) == 0.0
+        short_gate = py_morse_gate(np.array([1.0, 2.0], dtype=np.float32))
+        assert not np.any(short_gate["confirmed_innovations"])
+
+        dx, dy, meta = py_contact_step(0, 1.5, -0.5, nodes=[], edges=[])
+        assert dx == 1.5 and dy == -0.5 and meta["hit_wall"] is False
+
+    @pytest.mark.skipif(not NATIVE_AVAILABLE, reason="Native library triad_core_rs not compiled")
+    def test_native_beltrami_border_and_f64_stealth_rotor(self):
+        """Verifies clamped border Sobel salience on 64x64 frames and anisotropic_stiffness_rotor_f64."""
+        from triad_core._native import beltrami_morse_gate, anisotropic_stiffness_rotor
+
+        idx = np.arange(64 * 64, dtype=np.float32)
+        frame = (((idx * idx * 17 + idx * 37 + 13) % 100) * 0.01).reshape(64, 64)
+        sal, spikes, mad = beltrami_morse_gate(frame)
+        assert sal.shape == (64, 64)
+        assert spikes.shape == (64, 64)
+        assert mad > 0.0
+
+        r3 = np.eye(3, dtype=np.float64)
+        c_base = np.diag([100.0, 90.0, 80.0, 30.0, 25.0, 35.0])
+        m6, c_rot, res = anisotropic_stiffness_rotor(r3, c_base)
+        assert res <= 1.14e-13
+        assert np.allclose(m6, np.eye(6))
+        assert np.allclose(c_rot, c_base)
+
+    def test_cayley_rotor_index_vs_vector_equivalence(self):
+        """Verifies cayley_rotor_so16_step produces identical rotors for index vs basis-vector inputs."""
+        from triad_core.operators import cayley_rotor_so16_step as py_cayley
+
+        rng = np.random.default_rng(77)
+        v_in = rng.normal(size=16)
+        v_in /= np.linalg.norm(v_in)
+
+        for u_idx, v_idx in [(0, 2), (3, 11), (7, 15)]:
+            e_u = np.zeros(16, dtype=np.float64)
+            e_v = np.zeros(16, dtype=np.float64)
+            e_u[u_idx] = 1.0
+            e_v[v_idx] = 1.0
+            v_idx_out, r_idx = py_cayley(u_idx, v_idx, 0.35, v_in, dim=16)
+            v_vec_out, r_vec = py_cayley(e_u, e_v, 0.35, v_in, dim=16)
+            np.testing.assert_allclose(r_idx, r_vec, atol=1e-14)
+            np.testing.assert_allclose(v_idx_out, v_vec_out, atol=1e-14)
+
+    @pytest.mark.skipif(not NATIVE_AVAILABLE, reason="Native library triad_core_rs not compiled")
+    def test_ulp_polish_preserves_zero_coordinates_and_2d_beltrami_parity(self):
+        """Verifies native ULP polish never corrupts zero coordinates and 2D Beltrami matches Python."""
+        from triad_core._native import (
+            cayley_rotor_so16_step as nat_cayley,
+            beltrami_morse_gate as nat_beltrami,
+            skew_triad_step as nat_skew,
+            slow_fast_cascade_k16 as nat_cascade,
+            continuity_clutter_filter as nat_clutter,
+        )
+        from triad_core.operators import beltrami_morse_gate as py_beltrami
+
+        # 1. Zero coordinate at index 1 between non-zero indices 0 and 2 must remain 0.0
+        v_in = np.zeros(16, dtype=np.float32)
+        v_in[0] = 0.6
+        v_in[2] = 0.8
+        _, v_out, drift = nat_cayley(0, 2, 0.25, v_in=v_in)
+        assert drift == 0.0
+        assert v_out[1] == 0.0, f"Zero coordinate at index 1 corrupted to {v_out[1]}"
+        assert np.all(v_out[3:] == 0.0)
+
+        # 2. 2D Beltrami Python-vs-Native parity on non-4-multiple (65x65) and NaN/Inf resilience
+        idx = np.arange(65 * 65, dtype=np.float32)
+        frame_65 = (((idx * 29 + 7) % 97) * 0.01).reshape(65, 65).astype(np.float32)
+        frame_65[10, 10] = 0.92  # Washout candidate
+        frame_65[10, 9] = 0.92
+        frame_65[10, 11] = 0.92
+        nat_sal, nat_spikes, nat_mad = nat_beltrami(frame_65)
+        py_res = py_beltrami(frame_65)
+        assert np.max(np.abs(nat_sal - py_res["salience"])) <= 1e-7
+        assert abs(nat_mad - py_res["mad_floor"]) <= 1e-7
+        assert np.array_equal(nat_spikes, py_res["spike_mask"])
+
+        # 3. FFI bounds validation raises ValueError on undersized / mismatched arrays
+        with pytest.raises(ValueError):
+            nat_skew(np.ones(16, dtype=np.float32), np.ones(8, dtype=np.float32))
+        with pytest.raises(ValueError):
+            nat_skew(np.ones(65, dtype=np.float32), np.ones(65, dtype=np.float32))
+        with pytest.raises(ValueError):
+            nat_cascade(np.ones(8, dtype=np.float32), np.ones(16, dtype=np.float32))
+        with pytest.raises(ValueError):
+            nat_cayley(0, 1, 0.1, v_in=np.ones(8, dtype=np.float32))
+        with pytest.raises(ValueError):
+            nat_clutter(np.ones(16, dtype=np.float32), np.ones(15, dtype=np.float32))
+
+

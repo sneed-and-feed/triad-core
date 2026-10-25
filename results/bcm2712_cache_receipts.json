@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0.0",
   "verifier": "Broadcom BCM2712 Cortex-A76 Hardware Cache Verifier (scripts/verify_bcm2712_arena.py)",
-  "timestamp_utc": "2026-10-25T06:04:18Z",
+  "timestamp_utc": "2026-10-25T09:42:09Z",
   "hardware_target": "Broadcom BCM2712 (Raspberry Pi 5)",
   "cpu_core": "ARM Cortex-A76 (ARMv8.2-A)",
   "bcm2712_cache_geometry": {
@@ -44,8 +44,8 @@
       "arena_max_ceiling_bytes": 1258291,
       "arena_alignment_bytes": 64,
       "total_references": 50000000,
-      "simulation_wall_time_sec": 1.5158,
-      "throughput_refs_per_sec": 32986948.4,
+      "simulation_wall_time_sec": 1.452,
+      "throughput_refs_per_sec": 34435219.0,
       "l1d": {
         "hits": 29026562,
         "misses": 20973438,

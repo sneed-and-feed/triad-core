@@ -9,8 +9,7 @@ from __future__ import annotations
 import ctypes
 import os
 import platform
-import sys
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -286,15 +285,17 @@ def _setup_function_signatures(lib: ctypes.CDLL) -> None:
                 ctypes.POINTER(ctypes.c_float),
             ]
 
-    if hasattr(lib, "kelvin_mandel_so6_rotor_f64"):
-        lib.kelvin_mandel_so6_rotor_f64.restype = ctypes.c_int32
-        lib.kelvin_mandel_so6_rotor_f64.argtypes = [
-            ctypes.POINTER(ctypes.c_double),
-            ctypes.POINTER(ctypes.c_double),
-            ctypes.POINTER(ctypes.c_double),
-            ctypes.POINTER(ctypes.c_double),
-            ctypes.POINTER(ctypes.c_double),
-        ]
+    for name in ["kelvin_mandel_so6_rotor_f64", "anisotropic_stiffness_rotor_f64"]:
+        if hasattr(lib, name):
+            fn = getattr(lib, name)
+            fn.restype = ctypes.c_int32
+            fn.argtypes = [
+                ctypes.POINTER(ctypes.c_double),
+                ctypes.POINTER(ctypes.c_double),
+                ctypes.POINTER(ctypes.c_double),
+                ctypes.POINTER(ctypes.c_double),
+                ctypes.POINTER(ctypes.c_double),
+            ]
 
     # 6. contact_sheaf_se2_step_f32 / rigid_contact_coboundary_solver_f32
     for name in ["contact_sheaf_se2_step_f32", "rigid_contact_coboundary_solver_f32"]:
@@ -360,17 +361,28 @@ def skew_triad_step(
     v: np.ndarray,
     w: Optional[np.ndarray] = None,
     gamma: float = 0.05,
+    dt: Optional[float] = None,
 ) -> np.ndarray:
     """Canonical Operator 1: so(C) Bilinear Triad Step with Spherical Retraction."""
+    if dt is not None:
+        gamma = float(dt)
     lib = load_native_library()
-    u_c = np.ascontiguousarray(u, dtype=np.float32)
-    v_c = np.ascontiguousarray(v, dtype=np.float32)
+    u_c = np.ascontiguousarray(u, dtype=np.float32).ravel()
+    v_c = np.ascontiguousarray(v, dtype=np.float32).ravel()
     dim = len(u_c)
+    if dim <= 0 or dim > 64 or len(v_c) != dim:
+        raise ValueError(
+            f"skew_triad_step requires matching u, v lengths in 1..64 (got {len(u_c)}, {len(v_c)})"
+        )
     v_out = np.zeros(dim, dtype=np.float32)
 
     w_ptr = None
     if w is not None:
         w_c = np.ascontiguousarray(w, dtype=np.float32)
+        if w_c.size < dim * dim * dim:
+            raise ValueError(
+                f"skew_triad_step tensor w has {w_c.size} elements, requires at least {dim**3}"
+            )
         w_ptr = w_c.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
 
     rc = lib.skew_triad_step_f32(
@@ -391,9 +403,10 @@ def so_skew_tiebreaker(
     v: np.ndarray,
     w: Optional[np.ndarray] = None,
     gamma: float = 0.05,
+    dt: Optional[float] = None,
 ) -> np.ndarray:
     """Stealth alias for skew_triad_step."""
-    return skew_triad_step(u, v, w, gamma)
+    return skew_triad_step(u, v, w, gamma=gamma, dt=dt)
 
 
 def slow_fast_cascade_k16(
@@ -402,17 +415,28 @@ def slow_fast_cascade_k16(
     w_rec: Optional[np.ndarray] = None,
     k_steps: int = 16,
     gamma: float = 0.05,
+    dt: Optional[float] = None,
 ) -> Tuple[np.ndarray, float]:
     """Canonical Operator 2: 16-Step Slow-Fast Spherical Cascade with 0.000e+00 Drift."""
+    if dt is not None:
+        gamma = float(dt)
     lib = load_native_library()
-    u_c = np.ascontiguousarray(u, dtype=np.float32)
-    v_c = np.ascontiguousarray(v_in, dtype=np.float32)
+    u_c = np.ascontiguousarray(u, dtype=np.float32).ravel()
+    v_c = np.ascontiguousarray(v_in, dtype=np.float32).ravel()
+    if len(u_c) < 16 or len(v_c) < 16:
+        raise ValueError(
+            f"slow_fast_cascade_k16 requires u, v_in of length >= 16 (got {len(u_c)}, {len(v_c)})"
+        )
     v_out = np.zeros(16, dtype=np.float32)
     radial_drift = ctypes.c_float(0.0)
 
     w_ptr = None
     if w_rec is not None:
         w_c = np.ascontiguousarray(w_rec, dtype=np.float32)
+        if w_c.size < 4096:
+            raise ValueError(
+                f"slow_fast_cascade_k16 w_rec has {w_c.size} elements, requires at least 4096"
+            )
         w_ptr = w_c.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
 
     rc = lib.slow_fast_cascade_k16_f32(
@@ -435,9 +459,10 @@ def spherical_cascade_integrator(
     w_rec: Optional[np.ndarray] = None,
     k_steps: int = 16,
     gamma: float = 0.05,
+    dt: Optional[float] = None,
 ) -> Tuple[np.ndarray, float]:
     """Stealth alias for slow_fast_cascade_k16."""
-    return slow_fast_cascade_k16(u, v_in, w_rec, k_steps, gamma)
+    return slow_fast_cascade_k16(u, v_in, w_rec, k_steps=k_steps, gamma=gamma, dt=dt)
 
 
 def cayley_rotor_so16_step(
@@ -454,7 +479,11 @@ def cayley_rotor_so16_step(
 
     v_ptr = None
     if v_in is not None:
-        v_c = np.ascontiguousarray(v_in, dtype=np.float32)
+        v_c = np.ascontiguousarray(v_in, dtype=np.float32).ravel()
+        if len(v_c) < 16:
+            raise ValueError(
+                f"cayley_rotor_so16_step v_in requires length >= 16 (got {len(v_c)})"
+            )
         v_ptr = v_c.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
 
     rc = lib.cayley_rotor_so16_step_f32(
@@ -489,10 +518,16 @@ def compute_spatial_mad_floor_256(
     lib = load_native_library()
     sal_c = np.ascontiguousarray(salience.reshape(-1), dtype=np.float32)
     total_pixels = len(sal_c)
+    if total_pixels == 0:
+        return 0.0
 
     mask_ptr = None
     if clock_mask is not None:
         mask_c = np.ascontiguousarray(clock_mask.reshape(-1), dtype=np.uint8)
+        if len(mask_c) < total_pixels:
+            raise ValueError(
+                f"compute_spatial_mad_floor_256 clock_mask has {len(mask_c)} elements, requires {total_pixels}"
+            )
         mask_ptr = mask_c.ctypes.data_as(ctypes.POINTER(ctypes.c_uint8))
 
     val = lib.compute_spatial_mad_floor_256_c(
@@ -511,6 +546,10 @@ def beltrami_morse_gate(
     """Canonical Operator 4: Beltrami Exterior Curl + Discrete Morse Gate."""
     lib = load_native_library()
     in_c = np.ascontiguousarray(input_frame, dtype=np.float32)
+    if in_c.ndim < 2 or in_c.size == 0:
+        raise ValueError(
+            f"beltrami_morse_gate requires non-empty 2D input_frame (got shape {in_c.shape})"
+        )
     h, w = in_c.shape[:2]
     total = h * w
 
@@ -526,6 +565,10 @@ def beltrami_morse_gate(
     mask_ptr = None
     if clock_mask is not None:
         mask_c = np.ascontiguousarray(clock_mask, dtype=np.uint8)
+        if mask_c.size < total:
+            raise ValueError(
+                f"beltrami_morse_gate clock_mask has {mask_c.size} elements, requires at least {total}"
+            )
         mask_ptr = mask_c.ctypes.data_as(ctypes.POINTER(ctypes.c_uint8))
 
     rc = lib.beltrami_morse_gate_f32(
@@ -561,6 +604,10 @@ def kelvin_mandel_so6_rotor(
     lib = load_native_library()
     r_c = np.ascontiguousarray(r_so3.reshape(-1), dtype=np.float64)
     c_c = np.ascontiguousarray(c_base.reshape(-1), dtype=np.float64)
+    if r_c.size < 9 or c_c.size < 36:
+        raise ValueError(
+            f"kelvin_mandel_so6_rotor requires r_so3 (9) and c_base (36), got ({r_c.size}, {c_c.size})"
+        )
 
     m6_out = np.zeros(36, dtype=np.float64)
     c_rot_out = np.zeros(36, dtype=np.float64)
@@ -601,6 +648,8 @@ def contact_sheaf_se2_step(
     lib = load_native_library()
     num_nodes = len(nodes)
     num_edges = len(edges)
+    if num_nodes == 0:
+        raise ValueError("contact_sheaf_se2_step requires at least 1 node")
 
     node_arr = (TriadContactNode * num_nodes)()
     for i, n in enumerate(nodes):
@@ -679,6 +728,10 @@ def continuity_clutter_filter(
     cur_c = np.ascontiguousarray(current.reshape(-1), dtype=np.float32)
     prev_c = np.ascontiguousarray(previous.reshape(-1), dtype=np.float32)
     count = len(cur_c)
+    if count == 0 or len(prev_c) != count:
+        raise ValueError(
+            f"continuity_clutter_filter requires non-empty matching arrays (got {len(cur_c)}, {len(prev_c)})"
+        )
 
     clock_m = np.zeros(count, dtype=np.uint8)
     nope_m = np.zeros(count, dtype=np.uint8)
@@ -856,35 +909,60 @@ def verify_native_parity() -> Dict[str, Any]:
     # 7. TriadUniversalArena Layout & Size Verification (Theorem 2.11)
     lib = load_native_library()
     arena_sz = lib.triad_arena_size_bytes()
+    assert arena_sz == 894_912, f"Expected arena size 894,912 bytes, got {arena_sz}"
+    assert ctypes.sizeof(TriadUniversalArena) == arena_sz, (
+        f"ctypes size {ctypes.sizeof(TriadUniversalArena)} != native {arena_sz}"
+    )
     assert arena_sz <= 1_258_291, f"Arena size {arena_sz} exceeds 1.2 MB limit"
     assert arena_sz % 64 == 0, f"Arena size {arena_sz} not aligned to 64 bytes"
+
+    # Verify all 23 major sub-buffers in ctypes TriadUniversalArena are 64-byte aligned
+    subbuffer_fields = [
+        "spatial_input", "spatial_output", "salience_map", "curl_buffer", "ring_buffer",
+        "mask_clock", "mask_nope", "mask_glare", "mask_deferral", "triad_tensor_w",
+        "cascade_w_rec", "rotor_so16_a", "rotor_so16_r", "rotor_v_in", "rotor_v_out",
+        "stiffness_so3_r", "stiffness_so6_m", "stiffness_c_base", "stiffness_c_rot",
+        "contact_nodes", "contact_edges", "morse_state", "telemetry", "step_counter",
+    ]
+    for fname in subbuffer_fields:
+        offset = getattr(TriadUniversalArena, fname).offset
+        assert offset % 64 == 0, f"Sub-buffer '{fname}' offset {offset} is not 64-byte aligned"
+
     results["arena_size_bytes"] = arena_sz
     results["theorems_verified"].append("Thm 2.11 (sram_arena_cacheline_disjoint_and_bounded)")
 
     # Compare directly against TriadCoreEngine if available
-    try:
-        from triad_core.operators import TriadCoreEngine
-        engine = TriadCoreEngine()
-        W_parity = np.zeros((16, 16, 16), dtype=np.float32)
-        W_parity[0, 1, 2] = 0.5
-        W_parity[0, 2, 1] = -0.5
-        nat_v = skew_triad_step(u_test, v_test, W_parity, 0.05)
-        py_res = engine.so_skew_tiebreaker(u_test, v_test, W_parity, 0.05)
-        cross_res = float(np.max(np.abs(nat_v - py_res)))
-        assert cross_res <= 1.0e-6, f"Oracle cross parity {cross_res} exceeds 1.0e-6"
-        results["operator_residuals"]["oracle_cross_parity"] = cross_res
+    from triad_core.operators import TriadCoreEngine
+    engine = TriadCoreEngine()
+    W_parity = np.zeros((16, 16, 16), dtype=np.float32)
+    W_parity[0, 1, 2] = 0.5
+    W_parity[0, 2, 1] = -0.5
+    nat_v = skew_triad_step(u_test, v_test, W_parity, 0.05)
+    py_res = engine.so_skew_tiebreaker(u_test, v_test, W_parity, 0.05)
+    cross_res = float(np.max(np.abs(nat_v - py_res)))
+    assert cross_res <= 1.0e-6, f"Oracle cross parity {cross_res} exceeds 1.0e-6"
+    results["operator_residuals"]["oracle_cross_parity"] = cross_res
 
-        py_v_cayley, _ = engine.cayley_attitude_update(3, 11, 0.5, v_test)
-        cayley_cross_err = float(np.max(np.abs(v_cayley - py_v_cayley)))
-        assert cayley_cross_err <= 1.0e-6, f"Oracle Cayley cross parity {cayley_cross_err} exceeds 1.0e-6"
-        results["operator_residuals"]["oracle_cayley_parity"] = cayley_cross_err
+    py_v_cayley, _ = engine.cayley_attitude_update(3, 11, 0.5, v_test)
+    cayley_cross_err = float(np.max(np.abs(v_cayley - py_v_cayley)))
+    assert cayley_cross_err <= 1.0e-6, f"Oracle Cayley cross parity {cayley_cross_err} exceeds 1.0e-6"
+    results["operator_residuals"]["oracle_cayley_parity"] = cayley_cross_err
 
-        py_mad = engine.compute_spatial_mad_floor_256(test_salience, clock_m)
-        mad_cross_err = float(abs(native_mad - py_mad))
-        assert mad_cross_err <= 1.0e-7, f"Oracle MAD cross parity {mad_cross_err} exceeds 1.0e-7"
-        results["operator_residuals"]["oracle_mad_parity"] = mad_cross_err
-    except Exception as exc:
-        results["operator_residuals"]["oracle_cross_parity_error"] = str(exc)
+    py_mad = engine.compute_spatial_mad_floor_256(test_salience, clock_m)
+    mad_cross_err = float(abs(native_mad - py_mad))
+    assert mad_cross_err <= 1.0e-7, f"Oracle MAD cross parity {mad_cross_err} exceeds 1.0e-7"
+    results["operator_residuals"]["oracle_mad_parity"] = mad_cross_err
+
+    frame_2d = test_salience.reshape(128, 128)
+    clock_2d = clock_m.reshape(128, 128)
+    nat_sal_2d, nat_spikes_2d, nat_mad_2d = beltrami_morse_gate(frame_2d, clock_mask=clock_2d)
+    py_gate_2d = engine.morse_innovation_gate(frame_2d, clock_mask=clock_2d)
+    beltrami_sal_err = float(np.max(np.abs(nat_sal_2d - py_gate_2d["salience"])))
+    beltrami_mad_err = float(abs(nat_mad_2d - py_gate_2d["mad_floor"]))
+    assert beltrami_sal_err <= 1.0e-7, f"Oracle 2D Beltrami salience parity {beltrami_sal_err} exceeds 1.0e-7"
+    assert beltrami_mad_err <= 1.0e-7, f"Oracle 2D Beltrami MAD parity {beltrami_mad_err} exceeds 1.0e-7"
+    assert np.array_equal(nat_spikes_2d, py_gate_2d["spike_mask"]), "Oracle 2D Beltrami spike_mask mismatch"
+    results["operator_residuals"]["oracle_beltrami_2d_parity"] = beltrami_sal_err
 
     results["passed"] = True
     return results

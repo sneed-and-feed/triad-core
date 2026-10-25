@@ -281,6 +281,14 @@ int32_t kelvin_mandel_so6_rotor_f64(
     double *trace_residual_out
 );
 
+int32_t anisotropic_stiffness_rotor_f64(
+    const double *r_so3,
+    const double *c_base,
+    double *m_so6_out,
+    double *c_rot_out,
+    double *trace_residual_out
+);
+
 /* ========================================================================= */
 /* Operator 6: SE(2) Cellular Sheaf Contact Graph & Clutter Filter           */
 /* ========================================================================= */

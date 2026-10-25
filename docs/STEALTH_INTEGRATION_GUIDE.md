@@ -132,33 +132,36 @@ The native shared library (`triad_core_rs.dll`, `libtriad_core_rs.so`, or `libtr
 ### Header Inclusion
 
 ```c
-#include "triad_core.h"
+#include <stdalign.h>
 #include <stdio.h>
-#include <string.h>
+#include "triad_core.h"
 
 int main(void) {
-    /* 1. Allocate static arena on stack or BSS (64-byte aligned, ~1.2 MB) */
+    /* 1. Allocate static arena on stack or BSS (64-byte aligned, 894,912 B) */
     alignas(64) TriadUniversalArena arena;
-    memset(&arena, 0, sizeof(arena));
+    triad_arena_init(&arena);
 
     /* 2. State vectors */
-    alignas(64) float u[64];
-    alignas(64) float v[64];
-    for (size_t i = 0; i < 64; ++i) {
-        u[i] = 1.0f / 8.0f;
+    alignas(64) float u[16];
+    alignas(64) float v[16];
+    alignas(64) float v_step[16];
+    alignas(64) float v_out[16];
+    float radial_drift = 0.0f;
+
+    for (size_t i = 0; i < 16; ++i) {
+        u[i] = 0.25f;
         v[i] = (i == 0) ? 1.0f : 0.0f;
     }
 
     /* 3. Invoke stealth domain-native tie-breaker */
-    so_skew_tiebreaker_f32(&arena, u, v, 64, 0.016f);
+    so_skew_tiebreaker_f32(u, v, NULL, 16, 0.016f, v_step);
 
     /* 4. Evaluate 16-step cascade */
-    spherical_cascade_integrator_f32(&arena, u, v, 64);
+    spherical_cascade_integrator_f32(u, v_step, NULL, 16, 0.016f, v_out, &radial_drift);
 
     /* 5. Verify invariant preservation */
-    TriadVerificationReceipt receipt = triad_core_verify_invariants(&arena);
-    if (receipt.all_theorems_passed) {
-        printf("Integrity confirmed: Norm drift = %.3e\\n", receipt.norm_drift);
+    if (radial_drift == 0.0f) {
+        printf("Integrity confirmed: Norm drift = %.3e\\n", radial_drift);
     }
 
     return 0;
@@ -175,11 +178,11 @@ In Python environments, developers can import `TriadCoreEngine` directly. All me
 import numpy as np
 from triad_core.operators import TriadCoreEngine
 
-# Initialize the engine (automatically selects native SIMD shared library or pure Python oracle)
+# Initialize the engine (supports both canonical and stealth domain aliases)
 engine = TriadCoreEngine()
 
-# Dimension C = 64
-dim = 64
+# Dimension C = 16
+dim = 16
 u = np.full(dim, 1.0 / np.sqrt(dim), dtype=np.float32)
 v = np.zeros(dim, dtype=np.float32)
 v[0] = 1.0
@@ -192,12 +195,10 @@ v_cascade = engine.spherical_cascade_integrator(u, v_next)
 
 # 3. Stealth Morse Innovation Gate
 history_buffer = np.sin(np.linspace(0, 10, 256), dtype=np.float32)
-sample = 0.5
-is_valid, filtered_sample = engine.morse_innovation_gate(sample, history_buffer)
+gate_res = engine.morse_innovation_gate(history_buffer)
 
 # 4. Stealth Cayley Attitude Rotor
-rotor = np.eye(16, dtype=np.float32)
-rotor_updated = engine.cayley_attitude_update(rotor, u[:16], v[:16], dt=0.016)
+v_rot, rotor_updated = engine.cayley_attitude_update(0, 1, 0.016, v_cascade)
 
 # 5. Verify formal theorem bounds
 audit = engine.verify_formal_theorems()
@@ -223,10 +224,10 @@ use triad_core_rs::TriadUniversalArena;
 
 static mut ARENA: TriadUniversalArena = TriadUniversalArena::new();
 
-pub fn control_step(u: &[f32; 64], v: &mut [f32; 64]) {
+pub fn control_step(u: &[f32; 16], v: &mut [f32; 16]) -> f32 {
     unsafe {
         ARENA.so_skew_tiebreaker_f32(u, v, 0.016);
-        ARENA.spherical_cascade_integrator_f32(u, v);
+        ARENA.spherical_cascade_integrator_f32(u, v)
     }
 }
 ```
@@ -239,7 +240,7 @@ The memory layout of `TriadUniversalArena` is engineered to fit within the 2.0 M
 
 - **L1 Data Cache (64 KB)**: Contains active working vectors ($u$, $v$, and local SIMD registers).
 - **L2 Cache (512 KB)**: Contains intermediate tensor projections and the 256-sample Morse stack.
-- **L3 Cache (2.0 MB)**: Accommodates the entire static arena ($1,048,576\text{ Bytes} \approx 1.0\text{ MB}$).
+- **L3 Cache (2.0 MB)**: Accommodates the entire static arena ($894,912\text{ Bytes} \approx 0.85\text{ MB}$).
 
 Because the entire memory footprint resides in on-chip SRAM, cold memory misses to external LPDDR4X SDRAM are completely eliminated, achieving an empirical Last-Level Cache miss rate of $0.0328\%$, well below the $0.05\%$ operational threshold.
 

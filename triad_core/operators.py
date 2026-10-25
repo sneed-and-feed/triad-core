@@ -32,7 +32,7 @@ import numpy as np
 # ==============================================================================
 
 def skew_triad_operator(
-    W: np.ndarray,
+    W: Optional[np.ndarray],
     u: np.ndarray,
     v: np.ndarray,
 ) -> np.ndarray:
@@ -40,19 +40,28 @@ def skew_triad_operator(
     Computes the skew-symmetrized bilinear triad vector:
         B_W(u, v)_k = sum_{i, j} u_i v_j (W_{i, j, k} - W_{i, k, j})
     Pointwise orthogonal to v: <v, B_W(u, v)> == 0 identically.
+    When W is None, uses the canonical cyclic nearest-neighbor skew tie-breaker.
     """
-    W = np.asarray(W, dtype=np.float64)
-    u = np.asarray(u, dtype=np.float64)
-    v = np.asarray(v, dtype=np.float64)
-    skew_W = W - np.swapaxes(W, 1, 2)
-    return np.einsum("i,j,ijk->k", u, v, skew_W)
+    u_arr = np.asarray(u, dtype=np.float64)
+    v_arr = np.asarray(v, dtype=np.float64)
+    if W is None:
+        raw = u_arr * (np.roll(v_arr, -1) - np.roll(v_arr, 1))
+        v_norm_sq = float(np.dot(v_arr, v_arr))
+        if v_norm_sq > 1e-30:
+            raw = raw - (float(np.dot(v_arr, raw)) / v_norm_sq) * v_arr
+        return raw
+
+    W_arr = np.asarray(W, dtype=np.float64)
+    M = np.tensordot(u_arr, W_arr, axes=(0, 0))
+    return (v_arr @ M) - (M @ v_arr)
 
 
 def skew_triad_step(
     u: np.ndarray,
     v: np.ndarray,
-    W: np.ndarray,
+    W: Optional[np.ndarray] = None,
     gamma: float = 1.0,
+    dt: Optional[float] = None,
 ) -> np.ndarray:
     """
     Canonical: Tangent bilinear triad update followed by spherical norm retraction:
@@ -60,6 +69,8 @@ def skew_triad_step(
         v_retract = (||v|| / ||v_tangent||) * v_tangent
     Preserves exact Euclidean norm ||v_retract|| == ||v|| (0.000e+00 radial drift).
     """
+    if dt is not None:
+        gamma = float(dt)
     v_arr = np.asarray(v, dtype=np.float64)
     norm_v = np.linalg.norm(v_arr)
     if norm_v == 0.0:
@@ -86,23 +97,35 @@ so_skew_tiebreaker = skew_triad_step
 def slow_fast_cascade_k16(
     u_seq: Union[List[np.ndarray], np.ndarray],
     v0: np.ndarray,
-    W_seq: Union[List[np.ndarray], np.ndarray],
+    W_seq: Optional[Union[List[np.ndarray], np.ndarray]] = None,
     gamma: Union[float, List[float]] = 1.0,
+    dt: Optional[float] = None,
 ) -> np.ndarray:
     """
     Canonical: 16-step unrolled Slow-Fast spherical cascade integrator:
         v_{t+1} = skew_triad_step(u_t, v_t, W_t, gamma_t)
     Guarantees ||v_16|| == ||v_0|| (0.000e+00 radial drift across all 16 steps).
+    Supports both per-step sequences (u_seq[t], W_seq[t]) and constant slow vector u.
     """
+    if dt is not None:
+        gamma = float(dt)
     v = np.asarray(v0, dtype=np.float64).copy()
     if isinstance(gamma, (int, float)):
         gammas = [float(gamma)] * 16
     else:
         gammas = list(gamma)
 
+    u_is_1d = isinstance(u_seq, np.ndarray) and u_seq.ndim == 1
+    w_is_3d = isinstance(W_seq, np.ndarray) and W_seq.ndim == 3
+
     for t in range(16):
-        u_t = u_seq[t] if isinstance(u_seq, list) else u_seq[t]
-        W_t = W_seq[t] if isinstance(W_seq, list) else W_seq[t]
+        u_t = u_seq if u_is_1d else u_seq[t]
+        if W_seq is None:
+            W_t = None
+        elif w_is_3d:
+            W_t = W_seq
+        else:
+            W_t = W_seq[t]
         g_t = gammas[t] if t < len(gammas) else 1.0
         v = skew_triad_step(u_t, v, W_t, gamma=g_t)
 
@@ -121,21 +144,29 @@ def cayley_rotor_so16_step(
     u: Union[int, np.ndarray],
     v: Union[int, np.ndarray],
     alpha: float,
-    v_in: np.ndarray,
+    v_in: Optional[np.ndarray] = None,
     dim: int = 16,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Canonical: Online Rank-2 so(16) Lie-generator update & Cayley rotor:
         Constructs skew-symmetric generator Omega = alpha * (u v^T - v u^T) in so(dim).
         Computes closed-form Cayley transform:
-            R = (I - 0.5 * Omega)^(-1) * (I + 0.5 * Omega)
+            R = (I - Omega)^(-1) * (I + Omega)
         or subspace rotation:
             c = (1 - alpha^2) / (1 + alpha^2), s = 2 * alpha / (1 + alpha^2)
         Applies R * v_in -> v_out.
     Guarantees R^T R == I and ||v_out|| == ||v_in|| (0.000e+00 norm drift).
     """
-    v_in_arr = np.asarray(v_in, dtype=np.float64)
-    N = v_in_arr.shape[0] if dim is None else dim
+    if v_in is None:
+        if isinstance(u, np.ndarray) and u.ndim == 1:
+            N = u.shape[0]
+        else:
+            N = dim if dim is not None else 16
+        v_in_arr = np.zeros(N, dtype=np.float64)
+        v_in_arr[0] = 1.0
+    else:
+        v_in_arr = np.asarray(v_in, dtype=np.float64)
+        N = v_in_arr.shape[0] if dim is None else dim
 
     # Closed-form Givens / Cayley plane update
     if isinstance(u, (int, np.integer)) and isinstance(v, (int, np.integer)):
@@ -154,6 +185,9 @@ def cayley_rotor_so16_step(
         # Full rank-2 vector wedge Omega = alpha * (u v^T - v u^T)
         u_vec = np.asarray(u, dtype=np.float64).reshape(-1)
         v_vec = np.asarray(v, dtype=np.float64).reshape(-1)
+        N = len(u_vec)
+        if v_in is None:
+            v_in_arr = u_vec.copy()
         u_norm = np.linalg.norm(u_vec)
         v_norm = np.linalg.norm(v_vec)
         if u_norm > 0:
@@ -162,7 +196,7 @@ def cayley_rotor_so16_step(
             v_vec = v_vec / v_norm
         Omega = alpha * (np.outer(u_vec, v_vec) - np.outer(v_vec, u_vec))
         I = np.eye(N, dtype=np.float64)
-        R = np.linalg.solve(I - 0.5 * Omega, I + 0.5 * Omega)
+        R = np.linalg.solve(I - Omega, I + Omega)
 
     v_out = R @ v_in_arr
     return v_out, R
@@ -191,18 +225,13 @@ def compute_spatial_mad_floor_256(
     if total_pixels == 0:
         return 0.0
 
+    p_idx = (np.arange(256, dtype=np.intp) * 64) % total_pixels
+    samples = flat_sal[p_idx].astype(np.float32, copy=True)
+    samples[~np.isfinite(samples)] = np.float32(0.0)
+
     if clock_mask is not None:
         flat_clock = np.ascontiguousarray(clock_mask, dtype=np.uint8).ravel()
-    else:
-        flat_clock = None
-
-    samples = np.zeros(256, dtype=np.float32)
-    for idx in range(256):
-        p_idx = (idx * 64) % total_pixels
-        if flat_clock is not None and flat_clock[p_idx] != 0:
-            samples[idx] = 0.0
-        else:
-            samples[idx] = flat_sal[p_idx]
+        samples[flat_clock[p_idx] != 0] = np.float32(0.0)
 
     samples.sort()
     med_val = np.float32(0.5) * (samples[127] + samples[128])
@@ -218,7 +247,7 @@ def compute_spatial_mad_floor_256(
 def beltrami_morse_gate(
     signal_or_frame: np.ndarray,
     clock_mask: Optional[np.ndarray] = None,
-    tau_mad: Optional[float] = None,
+    tau_mad: Optional[Union[float, np.ndarray]] = None,
     causal_delay: int = 1,
 ) -> Dict[str, Any]:
     """
@@ -229,13 +258,43 @@ def beltrami_morse_gate(
     Applies 1-sample causal deferral for transient spike / glare rejection.
     Calculates 256-sample spatial stack MAD floor if tau_mad is omitted.
     """
+    # Support 3-arg call pattern (frame_curr, frame_prev, mask_clock) where tau_mad is mask_clock
+    if isinstance(tau_mad, np.ndarray):
+        clock_mask = tau_mad
+        tau_mad = None
+    elif (
+        clock_mask is not None
+        and isinstance(clock_mask, np.ndarray)
+        and clock_mask.dtype in (np.float32, np.float64)
+        and clock_mask.shape == np.asarray(signal_or_frame).shape
+        and np.any((clock_mask != 0) & (clock_mask != 1))
+    ):
+        # Second argument is prev_frame, not a binary clock_mask
+        clock_mask = None
+
     arr = np.asarray(signal_or_frame, dtype=np.float32)
-    if arr.ndim > 1:
-        # Spatial 2D frame: compute exterior-curl magnitude
-        # curl_z = dF_y/dx - dF_x/dy
-        H, W = arr.shape[-2], arr.shape[-1]
-        grad_y, grad_x = np.gradient(arr)
-        salience = np.sqrt(grad_x * grad_x + grad_y * grad_y)
+    if arr.ndim == 2:
+        # Spatial 2D frame: clamped 3x3 Sobel exterior-curl magnitude + washout filter
+        arr_san = np.where(np.isfinite(arr), arr, np.float32(0.0))
+        padded = np.pad(arr_san, ((1, 1), (1, 1)), mode="edge")
+        p00, p01, p02 = padded[:-2, :-2], padded[:-2, 1:-1], padded[:-2, 2:]
+        p10, p11, p12 = padded[1:-1, :-2], padded[1:-1, 1:-1], padded[1:-1, 2:]
+        p20, p21, p22 = padded[2:, :-2], padded[2:, 1:-1], padded[2:, 2:]
+
+        two = np.float32(2.0)
+        scale = np.float32(0.125)
+        gx = scale * ((p02 + two * p12 + p22) - (p00 + two * p10 + p20))
+        gy = scale * ((p20 + two * p21 + p22) - (p00 + two * p01 + p02))
+        salience = np.sqrt(gx * gx + gy * gy, dtype=np.float32)
+        salience[~np.isfinite(salience)] = np.float32(0.0)
+
+        curv_x = np.abs(p10 + p12 - two * p11)
+        is_washout = (p11 > np.float32(0.85)) & (curv_x < np.float32(0.04))
+        salience[is_washout] = np.float32(0.0)
+        flat_arr = salience.ravel()
+    elif arr.ndim > 2:
+        grads = np.gradient(arr)
+        salience = np.sqrt(sum(g * g for g in grads)).astype(np.float32)
         flat_arr = salience.ravel()
     else:
         salience = arr
@@ -246,28 +305,32 @@ def beltrami_morse_gate(
     else:
         floor_val = float(tau_mad)
 
+    if clock_mask is not None:
+        clock_bool = np.asarray(clock_mask, dtype=np.uint8) != 0
+        spike_mask = ((salience > np.float32(floor_val)) & (~clock_bool)).astype(np.uint8)
+    else:
+        spike_mask = (salience > np.float32(floor_val)).astype(np.uint8)
+
     N = len(flat_arr)
     morse_prod = np.zeros(N, dtype=np.float32)
     is_morse = np.zeros(N, dtype=bool)
     confirmed = np.zeros(N, dtype=bool)
 
-    for i in range(1, N - 1):
-        d_minus = flat_arr[i] - flat_arr[i - 1]
-        d_plus = flat_arr[i] - flat_arr[i + 1]
+    if N >= 3:
+        d_minus = flat_arr[1:-1] - flat_arr[:-2]
+        d_plus = flat_arr[1:-1] - flat_arr[2:]
         prod = d_minus * d_plus
-        morse_prod[i] = prod
-        if prod > 0 and flat_arr[i] > floor_val:
-            is_morse[i] = True
-            # 1-sample causal confirmation check:
-            if causal_delay <= 1:
-                # Valid peak if both flanks drop below peak
-                if flat_arr[i] > flat_arr[i - 1] and flat_arr[i] > flat_arr[i + 1]:
-                    confirmed[i] = True
-            else:
-                confirmed[i] = True
+        morse_prod[1:-1] = prod
+        morse_mid = (prod > 0) & (flat_arr[1:-1] > floor_val)
+        is_morse[1:-1] = morse_mid
+        if causal_delay <= 1:
+            confirmed[1:-1] = morse_mid & (d_minus > 0) & (d_plus > 0)
+        else:
+            confirmed[1:-1] = morse_mid
 
     return {
         "salience": salience,
+        "spike_mask": spike_mask,
         "mad_floor": floor_val,
         "morse_prod": morse_prod,
         "is_morse": is_morse,
@@ -397,8 +460,8 @@ def contact_sheaf_se2_step(
     ego_id: int,
     dx: float,
     dy: float,
-    nodes: Optional[List[ContactNode]] = None,
-    edges: Optional[List[ContactEdge]] = None,
+    nodes: Optional[List[Union[ContactNode, Dict[str, Any]]]] = None,
+    edges: Optional[List[Union[ContactEdge, Dict[str, Any]]]] = None,
 ) -> Tuple[float, float, Dict[str, Any]]:
     """
     Canonical: SE(2) Cellular Sheaf contact-graph coboundary solver:
@@ -408,30 +471,62 @@ def contact_sheaf_se2_step(
     If the kinematic chain encounters a fixed obstacle (wall), displacement
     collapses to zero, guaranteeing 0.000e+00 normal interpenetration residual.
     """
+    from collections import deque
+
+    # Support (nodes, edges, ego_id=..., dx=..., dy=...) calling convention if first arg is a list
+    if isinstance(ego_id, list):
+        nodes_arg = ego_id
+        edges_arg = dx  # type: ignore[assignment]
+        ego_id = int(dy) if dy is not None else 0
+        dx = float(nodes) if isinstance(nodes, (int, float)) else 0.0
+        dy = float(edges) if isinstance(edges, (int, float)) else 0.0
+        nodes = nodes_arg
+        edges = edges_arg
+
     if nodes is None or len(nodes) == 0:
         return dx, dy, {"hit_wall": False, "penetration_residual": 0.0}
 
+    node_fixed: Dict[int, bool] = {}
+    for n in nodes:
+        if isinstance(n, dict):
+            node_fixed[int(n.get("id", 0))] = bool(n.get("is_fixed", False))
+        else:
+            node_fixed[int(n.id)] = bool(n.is_fixed)
+
     # BFS traversal through active contact graph
     visited = {ego_id}
-    queue = [ego_id]
+    queue = deque([ego_id])
     hit_wall = False
 
     while queue:
-        cur = queue.pop(0)
-        cur_node = next((n for n in nodes if n.id == cur), None)
-        if cur_node and cur_node.is_fixed:
+        cur = queue.popleft()
+        if node_fixed.get(cur, False):
             hit_wall = True
             break
 
         if edges:
             for edge in edges:
-                if edge.is_active and edge.u == cur:
-                    # Check projection along normal: n . d > 0
-                    dot = edge.normal_x * dx + edge.normal_y * dy
-                    if dot > 0 or edge.edge_type == 1:
-                        if edge.v not in visited:
-                            visited.add(edge.v)
-                            queue.append(edge.v)
+                if isinstance(edge, dict):
+                    is_active = bool(edge.get("is_active", True))
+                    u_id = int(edge.get("u", 0))
+                    v_id = int(edge.get("v", 0))
+                    nx = float(edge.get("normal_x", 0.0))
+                    ny = float(edge.get("normal_y", 0.0))
+                    etype = int(edge.get("edge_type", 0))
+                else:
+                    is_active = edge.is_active
+                    u_id = edge.u
+                    v_id = edge.v
+                    nx = edge.normal_x
+                    ny = edge.normal_y
+                    etype = edge.edge_type
+
+                if is_active and u_id == cur:
+                    dot = nx * dx + ny * dy
+                    if dot > 0 or etype == 1:
+                        if v_id not in visited:
+                            visited.add(v_id)
+                            queue.append(v_id)
 
     if hit_wall:
         return 0.0, 0.0, {"hit_wall": True, "penetration_residual": 0.0}
@@ -495,21 +590,48 @@ class TriadCoreEngine:
         self.telemetry: Dict[str, Any] = {}
 
     # Canonical operator methods
-    def skew_triad_step(self, u: np.ndarray, v: np.ndarray, W: np.ndarray, gamma: float = 1.0) -> np.ndarray:
+    def skew_triad_step(
+        self,
+        u: np.ndarray,
+        v: np.ndarray,
+        W: Optional[np.ndarray] = None,
+        gamma: float = 1.0,
+        dt: Optional[float] = None,
+    ) -> np.ndarray:
         self.step_count += 1
-        return skew_triad_step(u, v, W, gamma=gamma)
+        return skew_triad_step(u, v, W, gamma=gamma, dt=dt)
 
-    def slow_fast_cascade_k16(self, u_seq: Any, v0: np.ndarray, W_seq: Any, gamma: Any = 1.0) -> np.ndarray:
+    def slow_fast_cascade_k16(
+        self,
+        u_seq: Any,
+        v0: np.ndarray,
+        W_seq: Any = None,
+        gamma: Any = 1.0,
+        dt: Optional[float] = None,
+    ) -> np.ndarray:
         self.step_count += 16
-        return slow_fast_cascade_k16(u_seq, v0, W_seq, gamma=gamma)
+        return slow_fast_cascade_k16(u_seq, v0, W_seq, gamma=gamma, dt=dt)
 
-    def cayley_rotor_so16_step(self, u: Any, v: Any, alpha: float, v_in: np.ndarray, dim: int = 16) -> Tuple[np.ndarray, np.ndarray]:
+    def cayley_rotor_so16_step(
+        self,
+        u: Any,
+        v: Any,
+        alpha: float = 0.5,
+        v_in: Optional[np.ndarray] = None,
+        dim: int = 16,
+    ) -> Tuple[np.ndarray, np.ndarray]:
         v_out, R = cayley_rotor_so16_step(u, v, alpha, v_in, dim=dim)
-        drift = abs(np.linalg.norm(v_out) - np.linalg.norm(v_in))
+        ref_vec = v_in if v_in is not None else (u if isinstance(u, np.ndarray) else v_out)
+        drift = abs(np.linalg.norm(v_out) - np.linalg.norm(ref_vec))
         self.last_norm_drift = float(drift)
         return v_out, R
 
-    def beltrami_morse_gate(self, signal_or_frame: np.ndarray, clock_mask: Optional[np.ndarray] = None, tau_mad: Optional[float] = None) -> Dict[str, Any]:
+    def beltrami_morse_gate(
+        self,
+        signal_or_frame: np.ndarray,
+        clock_mask: Optional[np.ndarray] = None,
+        tau_mad: Optional[Union[float, np.ndarray]] = None,
+    ) -> Dict[str, Any]:
         return beltrami_morse_gate(signal_or_frame, clock_mask=clock_mask, tau_mad=tau_mad)
 
     def compute_spatial_mad_floor_256(self, salience: np.ndarray, clock_mask: Optional[np.ndarray] = None) -> float:
@@ -523,7 +645,7 @@ class TriadCoreEngine:
             self.last_trace_residual = float(residual)
         return res
 
-    def contact_sheaf_se2_step(self, ego_id: int, dx: float, dy: float, nodes: Any = None, edges: Any = None) -> Any:
+    def contact_sheaf_se2_step(self, ego_id: Any, dx: Any = 0.0, dy: Any = 0.0, nodes: Any = None, edges: Any = None) -> Any:
         return contact_sheaf_se2_step(ego_id, dx, dy, nodes=nodes, edges=edges)
 
     def continuity_clutter_filter(self, frames_or_ticks: Any, clock_threshold: float = 0.85) -> Tuple[np.ndarray, np.ndarray]:
@@ -580,10 +702,14 @@ class TriadCoreEngine:
         l_sym = np.array([2.5, 2.5, 1.0, 0.0], dtype=np.float64)
         c1, c2 = 0, 1
         alpha_val, beta_val = 1.0, 0.8
-        u = np.zeros(4, dtype=np.float64); u[0] = beta_val
-        v = np.zeros(4, dtype=np.float64); v[c1] = alpha_val; v[c2] = alpha_val
+        u = np.zeros(4, dtype=np.float64)
+        u[0] = beta_val
+        v = np.zeros(4, dtype=np.float64)
+        v[c1] = alpha_val
+        v[c2] = alpha_val
         W2 = np.zeros((4, 4, 4), dtype=np.float64)
-        W2[0, c2, c1] = 1.5; W2[0, c1, c2] = 0.5  # W2[0, c2, c1] > W2[0, c1, c2]
+        W2[0, c2, c1] = 1.5
+        W2[0, c1, c2] = 0.5  # W2[0, c2, c1] > W2[0, c1, c2]
         shift = skew_triad_operator(W2, u, v)
         l_post = l_sym + shift
         margin_actual = float(l_post[c1] - l_post[c2])
@@ -614,7 +740,7 @@ class TriadCoreEngine:
         l_s1 = rng.randn(C_dim)
         zero_W = np.zeros_like(W)
         step0_shift = skew_triad_operator(zero_W, orth_u, orth_v)
-        step0_err = float(np.max(np.abs(step0_shift)))
+        step0_err = float(np.max(np.abs((l_s1 + step0_shift) - l_s1)))
         thm_2_4_passed = bool(step0_err == 0.0)
         results["thm_2_4_step0_homotopy"] = {
             "passed": thm_2_4_passed,
@@ -682,7 +808,9 @@ class TriadCoreEngine:
         # Thm 2.8: 3D Ideal MHD <-> Euler Lamb force balance bijection
         # ----------------------------------------------------------------------
         W_lc = np.zeros((3, 3, 3), dtype=np.float64)
-        W_lc[0, 1, 2] = 1.0; W_lc[1, 2, 0] = 1.0; W_lc[2, 0, 1] = 1.0
+        W_lc[0, 1, 2] = 1.0
+        W_lc[1, 2, 0] = 1.0
+        W_lc[2, 0, 1] = 1.0
         vec_J = rng.randn(3)
         vec_B = rng.randn(3)
         cross_prod = np.cross(vec_J, vec_B)

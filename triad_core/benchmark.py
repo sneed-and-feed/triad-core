@@ -23,7 +23,7 @@ import math
 import os
 import sys
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 
@@ -52,16 +52,8 @@ def skew_triad_operator(W: np.ndarray, u: np.ndarray, v: np.ndarray) -> np.ndarr
     B_W(u, v)_k = sum_{i, j} u_i v_j (W_{i, j, k} - W_{i, k, j}).
     Guarantees <v, B_W(u, v)> = 0 identically (Theorem 2.3).
     """
-    C = len(v)
-    out = np.zeros(C, dtype=np.float64)
-    for k in range(C):
-        s = 0.0
-        for i in range(len(u)):
-            for j in range(C):
-                term = W[i, j, k] - W[i, k, j]
-                s += u[i] * v[j] * term
-        out[k] = s
-    return out
+    M = np.tensordot(u, W, axes=(0, 0))
+    return (v @ M) - (M @ v)
 
 
 def build_so6_kelvin_rotor_from_dip_azimuth(dip_deg: float, azi_deg: float) -> np.ndarray:
@@ -186,64 +178,61 @@ def run_workload_01_eoir_tracking(num_steps: int = 5000) -> Dict[str, Any]:
 
     t0 = time.perf_counter()
 
-    track1_pos = clean1[0].copy()
-    track1_vel = v1.copy()
-    track2_pos = clean2[0].copy()
-    track2_vel = v2.copy()
+    t1x, t1y = float(clean1[0, 0]), float(clean1[0, 1])
+    v1x, v1y = float(v1[0]) * dt, float(v1[1]) * dt
+    t2x, t2y = float(clean2[0, 0]), float(clean2[0, 1])
+    v2x, v2y = float(v2[0]) * dt, float(v2[1]) * dt
 
     glints_rejected = 0
     track_swaps = 0
-    id_mapping: Dict[int, int] = {1: 1, 2: 2}
+    map1, map2 = 1, 2
 
-    last_valid1 = track1_pos.copy()
-    last_valid2 = track2_pos.copy()
+    lv1x, lv1y = t1x, t1y
+    lv2x, lv2y = t2x, t2y
+    hypot = math.hypot
 
     for k in range(1, num_steps):
-        pred1 = track1_pos + track1_vel * dt
-        pred2 = track2_pos + track2_vel * dt
+        p1x, p1y = t1x + v1x, t1y + v1y
+        p2x, p2y = t2x + v2x, t2y + v2y
 
-        raw1 = obs1[k]
-        raw2 = obs2[k]
+        r1x, r1y = float(obs1[k, 0]), float(obs1[k, 1])
+        r2x, r2y = float(obs2[k, 0]), float(obs2[k, 1])
 
         # 3-point discrete Morse innovation gate on track 1
-        d1 = float(np.linalg.norm(raw1 - last_valid1))
-        if d1 > 15.0:
+        if hypot(r1x - lv1x, r1y - lv1y) > 15.0:
             glints_rejected += 1
-            track1_pos = pred1  # Coast along System 1 carry trajectory
+            t1x, t1y = p1x, p1y  # Coast along System 1 carry trajectory
         else:
-            track1_pos = raw1
-            last_valid1 = raw1.copy()
+            t1x, t1y = r1x, r1y
+            lv1x, lv1y = r1x, r1y
 
         # 3-point discrete Morse innovation gate on track 2
-        d2 = float(np.linalg.norm(raw2 - last_valid2))
-        if d2 > 15.0:
+        if hypot(r2x - lv2x, r2y - lv2y) > 15.0:
             glints_rejected += 1
-            track2_pos = pred2
+            t2x, t2y = p2x, p2y
         else:
-            track2_pos = raw2
-            last_valid2 = raw2.copy()
+            t2x, t2y = r2x, r2y
+            lv2x, lv2y = r2x, r2y
 
         # Standard CLEAR MOTA ID tracking
-        # Match ground truth clean1 and clean2 to tracker states
-        d_gt1_t1 = np.linalg.norm(clean1[k] - track1_pos)
-        d_gt1_t2 = np.linalg.norm(clean1[k] - track2_pos)
-        d_gt2_t1 = np.linalg.norm(clean2[k] - track1_pos)
-        d_gt2_t2 = np.linalg.norm(clean2[k] - track2_pos)
+        c1x, c1y = float(clean1[k, 0]), float(clean1[k, 1])
+        c2x, c2y = float(clean2[k, 0]), float(clean2[k, 1])
+        d_gt1_t1 = hypot(c1x - t1x, c1y - t1y)
+        d_gt1_t2 = hypot(c1x - t2x, c1y - t2y)
+        d_gt2_t1 = hypot(c2x - t1x, c2y - t1y)
+        d_gt2_t2 = hypot(c2x - t2x, c2y - t2y)
 
-        # Assignment of GT to Tracker IDs
         if (d_gt1_t1 + d_gt2_t2) <= (d_gt1_t2 + d_gt2_t1):
-            cur_map = {1: 1, 2: 2}
+            cur1, cur2 = 1, 2
         else:
-            cur_map = {1: 2, 2: 1}
+            cur1, cur2 = 2, 1
 
-        # Check if GT target ID changed tracker mapping when well separated (> 10 px)
-        if np.linalg.norm(clean1[k] - clean2[k]) > 10.0:
-            if 1 in id_mapping and id_mapping[1] != cur_map[1]:
+        if hypot(c1x - c2x, c1y - c2y) > 10.0:
+            if map1 != cur1:
                 track_swaps += 1
-            if 2 in id_mapping and id_mapping[2] != cur_map[2]:
+            if map2 != cur2:
                 track_swaps += 1
-            id_mapping[1] = cur_map[1]
-            id_mapping[2] = cur_map[2]
+            map1, map2 = cur1, cur2
 
     elapsed = time.perf_counter() - t0
     fps = num_steps / max(1e-6, elapsed)
@@ -569,7 +558,9 @@ def run_workload_06_beltrami_mhd_confinement(num_points: int = 5000) -> Dict[str
         v_vec = rng.normal(0.0, 1.0, size=3)
         v_vec /= np.linalg.norm(v_vec)
 
-        B_shift = skew_triad_operator(W_LC, u_vec, v_vec)
+        M = np.tensordot(u_vec, W_LC, axes=(0, 0))
+        A = M.T - M
+        B_shift = A @ v_vec
 
         # Tangency inner product: <v, B_W(u, v)> == 0
         tangency = abs(float(np.dot(v_vec, B_shift)))
@@ -579,11 +570,11 @@ def run_workload_06_beltrami_mhd_confinement(num_points: int = 5000) -> Dict[str
         # 16-step cascade spherical norm preservation
         v_cascade = v_vec.copy()
         norm_init = float(np.linalg.norm(v_cascade))
-        for step in range(16):
-            delta = 0.05 * skew_triad_operator(W_LC, u_vec, v_cascade)
-            v_cascade = v_cascade + delta
+        A_step = 0.05 * A
+        for _step in range(16):
+            v_cascade = v_cascade + (A_step @ v_cascade)
             # Spherical retraction
-            v_cascade = v_cascade * (norm_init / float(np.linalg.norm(v_cascade)))
+            v_cascade = v_cascade * (norm_init / math.sqrt(float(np.dot(v_cascade, v_cascade))))
         norm_final = float(np.linalg.norm(v_cascade))
         escape = abs(norm_final - norm_init)
         if escape > radial_flux_escape:

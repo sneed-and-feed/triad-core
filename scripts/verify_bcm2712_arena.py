@@ -28,11 +28,10 @@ from datetime import datetime, timezone
 import glob
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional
 
 try:
     import pefile

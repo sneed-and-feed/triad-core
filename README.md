@@ -102,7 +102,7 @@ The memory layout of `TriadUniversalArena` is statically engineered for the Broa
 | L2 Cache:  512 KB / Core (8-way, 64B lines)  -> Morse stack + buffers   |
 | L3 Cache:  2.0 MB Shared (16-way, 64B lines) -> Complete TriadArena     |
 +-------------------------------------------------------------------------+
-| TOTAL ARENA FOOTPRINT: 1,048,576 B (1.0 MB) < 1,258,291 B Ceiling       |
+| TOTAL ARENA FOOTPRINT: 894,912 B (0.85 MB) < 1,258,291 B Ceiling        |
 | DYNAMIC ALLOCATIONS:   0 malloc / 0 free / 0 __rust_alloc               |
 +-------------------------------------------------------------------------+
 ```
@@ -196,22 +196,28 @@ assert audit["all_passed"]
 ### C99 / C11 Header Inclusion
 
 ```c
+#include <stdalign.h>
 #include "triad_core.h"
 
 int main(void) {
     alignas(64) TriadUniversalArena arena;
-    alignas(64) float u[64];
-    alignas(64) float v[64];
+    alignas(64) float u[16];
+    alignas(64) float v[16];
+    alignas(64) float v_step[16];
+    alignas(64) float v_out[16];
+    float radial_drift = 0.0f;
+
+    triad_arena_init(&arena);
 
     /* Initialize state */
-    for (size_t i = 0; i < 64; ++i) {
-        u[i] = 1.0f / 8.0f;
+    for (size_t i = 0; i < 16; ++i) {
+        u[i] = 0.25f;
         v[i] = (i == 0) ? 1.0f : 0.0f;
     }
 
     /* Execute stealth operators */
-    so_skew_tiebreaker_f32(&arena, u, v, 64, 0.016f);
-    spherical_cascade_integrator_f32(&arena, u, v, 64);
+    so_skew_tiebreaker_f32(u, v, NULL, 16, 0.016f, v_step);
+    spherical_cascade_integrator_f32(u, v_step, NULL, 16, 0.016f, v_out, &radial_drift);
 
     return 0;
 }

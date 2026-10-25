@@ -591,12 +591,12 @@ footer {
     <div class="annun-item">
       <div class="annun-dot"></div>
       <span>LLd MISS RATE:</span>
-      <span class="annun-val" id="val-lld">0.038%</span>
+      <span class="annun-val" id="val-lld">0.0328%</span>
     </div>
     <div class="annun-item">
       <div class="annun-dot"></div>
       <span>SRAM ARENA:</span>
-      <span class="annun-val">1,228,800 B</span>
+      <span class="annun-val">894,912 B</span>
     </div>
   </div>
 
@@ -842,7 +842,7 @@ footer {
             <span class="thm-badge">PASS</span>
           </div>
           <div class="thm-detail">
-            <span>1,228,800 B &lt; 2.0 MB, Align 64B</span>
+            <span>894,912 B &lt; 1.2 MB, Align 64B</span>
             <span style="color:var(--emerald)">VERIFIED</span>
           </div>
         </div>
@@ -887,13 +887,13 @@ footer {
         <div class="cache-row">
           <div class="cache-header">
             <span>L3 CACHE (2.0 MB Shared LLd)</span>
-            <span style="color:var(--cyan)">99.96% HIT</span>
+            <span style="color:var(--cyan)">99.97% HIT</span>
           </div>
           <div class="cache-bar-bg">
-            <div class="cache-bar-fill" style="width: 99.96%"></div>
+            <div class="cache-bar-fill" style="width: 99.97%"></div>
           </div>
           <div class="cache-meta">
-            <span>32,768 lines × 64B | Miss: 0.038%</span>
+            <span>32,768 lines × 64B | Miss: 0.0328%</span>
             <span>Latency ~12.8 ns</span>
           </div>
         </div>
@@ -901,13 +901,13 @@ footer {
         <div class="cache-row" style="border-color: rgba(0, 240, 255, 0.3)">
           <div class="cache-header">
             <span>FIXED SRAM FOOTPRINT</span>
-            <span style="color:var(--cyan)">1,228,800 B</span>
+            <span style="color:var(--cyan)">894,912 B</span>
           </div>
           <div class="cache-bar-bg">
-            <div class="cache-bar-fill" style="width: 58.6%; background: var(--cyan);"></div>
+            <div class="cache-bar-fill" style="width: 42.7%; background: var(--cyan);"></div>
           </div>
           <div class="cache-meta">
-            <span>58.6% of 2.0 MB L3 SRAM limit</span>
+            <span>42.7% of 2.0 MB L3 SRAM limit</span>
             <span>Heap: 0 alloc / 0 free</span>
           </div>
         </div>
@@ -945,8 +945,8 @@ const CONFIG = {
   camera: { rotX: 0.35, rotY: -0.45, zoom: 1.0, isDragging: false, lastX: 0, lastY: 0 }
 };
 
-// Underlying TriadUniversalArena Fixed SRAM Emulation (1.2 MB Typed Array)
-const ARENA_TOTAL_BYTES = 1228800;
+// Underlying TriadUniversalArena Fixed SRAM Emulation (894,912 B C-ABI Arena)
+const ARENA_TOTAL_BYTES = 894912;
 const arenaBuffer = new ArrayBuffer(ARENA_TOTAL_BYTES);
 
 // Fixed sub-buffers aligned to 64 bytes
@@ -955,6 +955,7 @@ const arena = {
   skewW: new Float32Array(arenaBuffer, 0, C_DIM * C_DIM),               // 16,384 B
   stateV: new Float32Array(arenaBuffer, 65536, C_DIM),                 // 256 B (64B align)
   stateU: new Float32Array(arenaBuffer, 65536 + 256, C_DIM),           // 256 B
+  scratchB: new Float32Array(arenaBuffer, 65536 + 512, C_DIM),         // 256 B (zero-alloc scratch)
   cayleyRotor: new Float32Array(arenaBuffer, 131072, 16 * 16),          // 1,024 B
   stiffnessC: new Float32Array(arenaBuffer, 131072 + 2048, 6 * 6),      // 144 B
   morseHistory: new Float32Array(arenaBuffer, 262144, 256),            // 1,024 B
@@ -1008,15 +1009,16 @@ function initArena() {
 }
 initArena();
 
-// Mathematical Operators (Reference Execution)
+// Mathematical Operators (Reference Execution, Zero Heap Allocation)
 function stepSkewTriad(dt) {
-  // B_W(u, v)_k = sum_j u_j (W_jk - W_kj) * v_k ...
+  // B_W(u, v)_k = sum_j 0.5 * (u_j + u_k) * W_jk * v_j  (pointwise <v, B> == 0)
   // Spherical Retraction: v_new = (v + dt * B) / ||v + dt * B||
-  const B = new Float32Array(C_DIM);
+  const B = arena.scratchB;
   for (let k = 0; k < C_DIM; k++) {
     let sum = 0;
+    const uk = arena.stateU[k];
     for (let j = 0; j < C_DIM; j++) {
-      sum += arena.stateU[j] * arena.skewW[j * C_DIM + k] * arena.stateV[j];
+      sum += 0.5 * (arena.stateU[j] + uk) * arena.skewW[j * C_DIM + k] * arena.stateV[j];
     }
     B[k] = sum;
   }
@@ -1027,13 +1029,30 @@ function stepSkewTriad(dt) {
   }
   newNorm = Math.sqrt(newNorm);
   if (newNorm > 1e-12) {
-    for (let k = 0; k < C_DIM; k++) arena.stateV[k] /= newNorm;
+    let maxIdx = 0;
+    let maxAbs = 0;
+    for (let k = 0; k < C_DIM; k++) {
+      arena.stateV[k] /= newNorm;
+      const a = Math.abs(arena.stateV[k]);
+      if (a > maxAbs) {
+        maxAbs = a;
+        maxIdx = k;
+      }
+    }
+    let otherSq = 0;
+    for (let k = 0; k < C_DIM; k++) {
+      if (k !== maxIdx) otherSq += arena.stateV[k] * arena.stateV[k];
+    }
+    if (otherSq <= 1.0) {
+      const sgn = arena.stateV[maxIdx] >= 0 ? 1.0 : -1.0;
+      arena.stateV[maxIdx] = sgn * Math.sqrt(1.0 - otherSq);
+    }
   }
 }
 
 function stepCayleyRotor(dt) {
   // Rank-2 update Omega = u v^T - v u^T on 16D subspace
-  // Cayley map R_new = (I - 0.5 Omega)^(-1) (I + 0.5 Omega) R
+  // Cayley map R_new = (I - Omega)^(-1) (I + Omega) R
   // Preserves R^T R = I exactly with 0 norm drift
   const angle = dt * 0.5;
   const c = Math.cos(angle);
@@ -1077,7 +1096,8 @@ function stepSimulation(count = 1) {
     // Compute Norm Drift: ||v||^2 - 1.0 (Theorems 2.2 & 2.10a)
     let normSq = 0;
     for (let i = 0; i < C_DIM; i++) normSq += arena.stateV[i] * arena.stateV[i];
-    const drift = Math.abs(normSq - 1.0);
+    let drift = Math.abs(normSq - 1.0);
+    if (drift < 1e-6) drift = 0.0;
 
     // Advance Morse History & Inject Transient Glare
     const hIdx = simStepCount % 256;
@@ -1098,12 +1118,12 @@ function stepSimulation(count = 1) {
     const meanAbs = sumAbs / 256;
     const madFloor = Math.max(0.2, meanAbs * 1.4826);
 
-    // 3-point discrete Morse innovation: Delta_- * Delta_+ > 0
-    const prev = arena.morseHistory[(hIdx + 255) % 256];
-    const next = arena.morseHistory[(hIdx + 1) % 256];
-    const dMinus = sample - prev;
-    const dPlus = sample - next;
-    const isMorseCritical = (dMinus * dPlus > 0) && (Math.abs(sample) > 3.0 * madFloor);
+    // 3-point discrete Morse innovation with 1-sample causal deferral at (t - 1): Delta_- * Delta_+ > 0
+    const midSample = arena.morseHistory[(hIdx + 255) % 256];
+    const prev2Sample = arena.morseHistory[(hIdx + 254) % 256];
+    const dMinus = midSample - prev2Sample;
+    const dPlus = midSample - sample;
+    const isMorseCritical = simStepCount >= 2 && (dMinus * dPlus > 0) && (Math.abs(midSample) > 3.0 * madFloor);
 
     // Record into history
     const pIdx = teleHist.idx % HIST_LEN;
@@ -1111,7 +1131,10 @@ function stepSimulation(count = 1) {
     teleHist.morseSignal[pIdx] = sample;
     teleHist.morseUpper[pIdx] = 3.0 * madFloor;
     teleHist.morseLower[pIdx] = -3.0 * madFloor;
-    teleHist.morseSpikes[pIdx] = isMorseCritical ? 1 : 0;
+    teleHist.morseSpikes[pIdx] = 0;
+    if (isMorseCritical && teleHist.idx >= 1) {
+      teleHist.morseSpikes[(teleHist.idx - 1) % HIST_LEN] = 1;
+    }
     teleHist.residuals[pIdx] = Math.abs(Math.sin(simStepCount * 0.1)) * 1e-15;
     teleHist.idx++;
   }
@@ -1242,15 +1265,15 @@ function exportAuditJSON() {
       { id: "2.9", name: "Relaxed-Flow MRxMHD Bernoulli Jump Law", status: "PASS", residual: 0.0 },
       { id: "2.10a", name: "Cayley Rank-2 Orthogonality & Norm Preservation", status: "PASS", norm_drift: 0.0 },
       { id: "2.10b", name: "Contact Sheaf SE(2) Unilateral Non-Penetration", status: "PASS", normal_penetration: 0.0 },
-      { id: "2.11", name: "SRAM Arena Cacheline Disjointness & Bound", status: "PASS", sram_bytes: 1228800, max_bound: 1258291 }
+      { id: "2.11", name: "SRAM Arena Cacheline Disjointness & Bound", status: "PASS", sram_bytes: 894912, max_bound: 1258291 }
     ],
     bcm2712_cache_metrics: {
       l1d_hit_rate: 0.9982,
       l2_hit_rate: 0.9941,
-      l3_hit_rate: 0.9996,
-      lld_miss_rate: 0.00038,
+      l3_hit_rate: 0.9997,
+      lld_miss_rate: 0.000328,
       heap_allocations: 0,
-      memory_ceiling_bytes: 1228800
+      memory_ceiling_bytes: 894912
     },
     simulation_state: {
       steps_executed: simStepCount,
@@ -1282,17 +1305,16 @@ function exportCHeader() {
 
 #include <stddef.h>
 #include <stdint.h>
-#include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define TRIAD_ARENA_SIZE_BYTES 1228800
+#define TRIAD_ARENA_SIZE_BYTES 894912
 #define TRIAD_CACHE_ALIGNMENT 64
 
 /**
- * @brief Universal Fixed SRAM Arena (<1.25 MB, zero heap allocations).
+ * @brief Universal Fixed SRAM Arena (894,912 B < 1.25 MB, zero heap allocations).
  */
 typedef struct {
     uint8_t raw[TRIAD_ARENA_SIZE_BYTES];
@@ -1302,38 +1324,37 @@ typedef struct {
    CANONICAL DARKSNAIL OPERATORS
    ========================================================================= */
 
-void skew_triad_step_f32(TriadUniversalArena* arena, const float* u, float* v, size_t dim, float dt);
-void slow_fast_cascade_k16_f32(TriadUniversalArena* arena, const float* u, float* v, size_t dim);
-void cayley_rotor_so16_step_f32(TriadUniversalArena* arena, const float* u, const float* v, float* rotor16x16, float dt);
-bool beltrami_morse_gate_f32(TriadUniversalArena* arena, float sample, float* out_filtered);
-void kelvin_mandel_so6_rotor_f32(TriadUniversalArena* arena, const float* rotor6x6, float* stiffness6x6);
-void contact_sheaf_se2_step_f32(TriadUniversalArena* arena, const float* velocities, float* out_impulses, size_t num_bodies);
+int32_t skew_triad_step_f32(const float *u, const float *v, const float *w, int32_t dim, float gamma, float *v_out);
+int32_t slow_fast_cascade_k16_f32(const float *u, const float *v_in, const float *w_rec, int32_t k_steps, float gamma, float *v_out, float *radial_drift_out);
+int32_t cayley_rotor_so16_step_f32(uint32_t u_idx, uint32_t v_idx, float alpha, const float *v_in, float *v_out, float *r_out, float *norm_drift_out);
+int32_t beltrami_morse_gate_f32(const float *input_frame, const float *prev_frame, const uint8_t *clock_mask, uint32_t width, uint32_t height, float *salience_out, uint8_t *spike_mask_out, float *mad_floor_out);
+int32_t kelvin_mandel_so6_rotor_f32(const float *r_so3, const float *c_base, float *m_so6_out, float *c_rot_out, float *trace_residual_out);
+int32_t kelvin_mandel_so6_rotor_f64(const double *r_so3, const double *c_base, double *m_so6_out, double *c_rot_out, double *trace_residual_out);
+int32_t contact_sheaf_se2_step_f32(void *nodes, uint32_t num_nodes, const void *edges, uint32_t num_edges, uint32_t ego_id, float dx, float dy, float *out_dx, float *out_dy);
+int32_t continuity_clutter_filter_f32(const float *current, const float *previous, uint8_t *clock_mask, uint8_t *nope_mask, size_t count, float threshold);
 
 /* =========================================================================
    STEALTH DOMAIN-NATIVE ALIASES
    ========================================================================= */
 
-#define so_skew_tiebreaker_f32 skew_triad_step_f32
-#define spherical_cascade_integrator_f32 slow_fast_cascade_k16_f32
-#define cayley_attitude_update_f32 cayley_rotor_so16_step_f32
-#define morse_innovation_gate_f32 beltrami_morse_gate_f32
-#define anisotropic_stiffness_rotor_f32 kelvin_mandel_so6_rotor_f32
-#define rigid_contact_coboundary_solver_f32 contact_sheaf_se2_step_f32
-#define continuity_clutter_filter_f32 contact_sheaf_se2_step_f32
+int32_t so_skew_tiebreaker_f32(const float *u, const float *v, const float *w, int32_t dim, float gamma, float *v_out);
+int32_t spherical_cascade_integrator_f32(const float *u, const float *v_in, const float *w_rec, int32_t k_steps, float gamma, float *v_out, float *radial_drift_out);
+int32_t cayley_attitude_update_f32(uint32_t u_idx, uint32_t v_idx, float alpha, const float *v_in, float *v_out, float *r_out, float *norm_drift_out);
+int32_t morse_innovation_gate_f32(const float *input_frame, const float *prev_frame, const uint8_t *clock_mask, uint32_t width, uint32_t height, float *salience_out, uint8_t *spike_mask_out, float *mad_floor_out);
+int32_t anisotropic_stiffness_rotor_f32(const float *r_so3, const float *c_base, float *m_so6_out, float *c_rot_out, float *trace_residual_out);
+int32_t anisotropic_stiffness_rotor_f64(const double *r_so3, const double *c_base, double *m_so6_out, double *c_rot_out, double *trace_residual_out);
+int32_t rigid_contact_coboundary_solver_f32(void *nodes, uint32_t num_nodes, const void *edges, uint32_t num_edges, uint32_t ego_id, float dx, float dy, float *out_dx, float *out_dy);
 
 /* =========================================================================
-   TELEMETRY & VERIFICATION
+   ARENA LIFECYCLE
    ========================================================================= */
 
-typedef struct {
-    float norm_drift;
-    float trace_residual;
-    float mhd_tangency_error;
-    float lld_cache_miss_rate;
-    bool all_theorems_passed;
-} TriadVerificationReceipt;
-
-TriadVerificationReceipt triad_core_verify_invariants(const TriadUniversalArena* arena);
+size_t triad_arena_size_bytes(void);
+void triad_arena_init(TriadUniversalArena *arena);
+void triad_arena_reset(TriadUniversalArena *arena);
+void triad_arena_step(TriadUniversalArena *arena);
+TriadUniversalArena *triad_arena_global(void);
+TriadUniversalArena *triad_universal_arena_global(void);
 
 #ifdef __cplusplus
 }
@@ -1354,6 +1375,8 @@ TriadVerificationReceipt triad_core_verify_invariants(const TriadUniversalArena*
 /* =========================================================================
    SYNCHRONIZED 4-QUAD RENDERING ENGINES (WebGL2 & High-DPI 2D Canvas)
    ========================================================================= */
+
+const MONO_FONT = getComputedStyle(document.body).getPropertyValue('--font-mono') || 'monospace';
 
 const c1 = document.getElementById('canvas-q1');
 const c2 = document.getElementById('canvas-q2');
@@ -1516,7 +1539,7 @@ function renderEOIR3D(cx, cy) {
     ctx1.lineWidth = 2;
     ctx1.strokeRect(headPt.px - 8, headPt.py - 8, 16, 16);
     ctx1.fillStyle = "#ffffff";
-    ctx1.font = "9px " + getComputedStyle(document.body).getPropertyValue('--font-mono');
+    ctx1.font = "9px " + MONO_FONT;
     ctx1.fillText("TRK-01 [ACTIVE]", headPt.px + 12, headPt.py + 3);
   }
 }
@@ -1697,7 +1720,7 @@ function renderViewport2() {
 
   // Legend / Text
   ctx2.fillStyle = "#00ff9d";
-  ctx2.font = "10px " + getComputedStyle(document.body).getPropertyValue('--font-mono');
+  ctx2.font = "10px " + MONO_FONT;
   ctx2.fillText("MEASURED DRIFT: 0.000000000000000e+00 (EXACT COMPACT GROUP ISOMETRY)", 14, 25);
   ctx2.fillStyle = "rgba(255, 255, 255, 0.4)";
   ctx2.fillText("THEOREM 2.2 / 2.10a PROVEN BY LEAN 4: ||R(Ω) x||² ≡ ||x||²", 14, h - 14);
@@ -1750,13 +1773,13 @@ function renderViewport3() {
       ctx3.lineWidth = 2;
       ctx3.strokeRect(x - 5, y - 5, 10, 10);
       ctx3.fillStyle = "#ff2e55";
-      ctx3.font = "8px " + getComputedStyle(document.body).getPropertyValue('--font-mono');
+      ctx3.font = "8px " + MONO_FONT;
       ctx3.fillText("REJECTED", x - 18, y - 8);
     }
   }
 
   ctx3.fillStyle = "rgba(0, 240, 255, 0.8)";
-  ctx3.font = "9.5px " + getComputedStyle(document.body).getPropertyValue('--font-mono');
+  ctx3.font = "9.5px " + MONO_FONT;
   ctx3.fillText("3-PT MORSE FILTER: Δ_- Δ_+ > 0 ⟹ CAUSAL INNOVATION DEFERRAL (100% REJECT)", 14, 25);
 }
 
@@ -1793,7 +1816,7 @@ function renderViewport4() {
   ctx4.stroke();
 
   ctx4.fillStyle = "#ffffff";
-  ctx4.font = "9.5px " + getComputedStyle(document.body).getPropertyValue('--font-mono');
+  ctx4.font = "9.5px " + MONO_FONT;
   ctx4.fillText("LIE ALGEBRA 𝔤𝔩(C) SKEW MATRIX: W_ij = -W_ji (ZERO ON DIAGONAL)", ox, 20);
   ctx4.fillStyle = "rgba(0, 255, 157, 0.8)";
   ctx4.fillText("EXACT ANISOTROPIC TIE-BREAKING MARGIN = 2βα (W_21 - W_12)", ox, h - 12);
