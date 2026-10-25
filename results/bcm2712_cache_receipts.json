@@ -1,0 +1,102 @@
+{
+  "schema_version": "1.0.0",
+  "verifier": "Broadcom BCM2712 Cortex-A76 Hardware Cache Verifier (scripts/verify_bcm2712_arena.py)",
+  "timestamp_utc": "2026-10-25T06:04:18Z",
+  "hardware_target": "Broadcom BCM2712 (Raspberry Pi 5)",
+  "cpu_core": "ARM Cortex-A76 (ARMv8.2-A)",
+  "bcm2712_cache_geometry": {
+    "hardware_target": "Broadcom BCM2712 (Raspberry Pi 5)",
+    "cpu_core": "ARM Cortex-A76 (ARMv8.2-A)",
+    "clock_mhz": 2400,
+    "line_size_bytes": 64,
+    "l1d": {
+      "size_bytes": 65536,
+      "size_kb": 64,
+      "ways": 4,
+      "sets": 256,
+      "line_size_bytes": 64,
+      "policy": "Pseudo-LRU / Tree-PLRU (4-way)"
+    },
+    "l2": {
+      "size_bytes": 524288,
+      "size_kb": 512,
+      "ways": 8,
+      "sets": 1024,
+      "line_size_bytes": 64,
+      "policy": "Pseudo-LRU (8-way private per core)"
+    },
+    "l3": {
+      "size_bytes": 2097152,
+      "size_mb": 2.0,
+      "ways": 16,
+      "sets": 2048,
+      "line_size_bytes": 64,
+      "policy": "Pseudo-LRU / True LRU (16-way shared LLd)"
+    }
+  },
+  "arenas": {
+    "triad_core": {
+      "arena_struct": "TriadUniversalArena",
+      "spoke": "triad_core",
+      "description": "Universal 6-Vertical Triad SIMD Fixed SRAM Arena",
+      "arena_size_bytes": 1048576,
+      "arena_size_kb": 1024.0,
+      "arena_max_ceiling_bytes": 1258291,
+      "arena_alignment_bytes": 64,
+      "total_references": 50000000,
+      "simulation_wall_time_sec": 1.5158,
+      "throughput_refs_per_sec": 32986948.4,
+      "l1d": {
+        "hits": 29026562,
+        "misses": 20973438,
+        "hit_rate_pct": 58.05
+      },
+      "l2": {
+        "hits": 18460713,
+        "misses": 2512725,
+        "hit_rate_pct": 88.02
+      },
+      "l3": {
+        "hits": 2496341,
+        "misses": 16384,
+        "hit_rate_pct": 99.35
+      },
+      "lld_miss_rate_pct": 0.03277,
+      "target_lld_miss_rate_pct": 0.05,
+      "target_achieved": true,
+      "allocator_static_audit": {
+        "audited": true,
+        "target_binary": "C:/Users/x/Documents/antigravity/triad-core/rust/triad_core_rs/target/release/triad_core_rs.dll",
+        "heap_allocators_imported": [],
+        "stepping_symbols_verified": [
+          "skew_triad_step_f32",
+          "slow_fast_cascade_k16_f32",
+          "cayley_rotor_so16_step_f32",
+          "beltrami_morse_gate_f32",
+          "kelvin_mandel_so6_rotor_f32",
+          "contact_sheaf_se2_step_f32"
+        ],
+        "stealth_symbols_verified": [
+          "so_skew_tiebreaker_f32",
+          "spherical_cascade_integrator_f32",
+          "cayley_attitude_update_f32",
+          "morse_innovation_gate_f32",
+          "anisotropic_stiffness_rotor_f32",
+          "rigid_contact_coboundary_solver_f32"
+        ],
+        "dynamic_allocations_detected": 0,
+        "status": "ZERO_DYNAMIC_ALLOCATIONS_VERIFIED"
+      }
+    }
+  },
+  "summary": {
+    "total_arenas_verified": 1,
+    "total_references_simulated": 50000000,
+    "mean_lld_miss_rate_pct": 0.03277,
+    "max_lld_miss_rate_pct": 0.03277,
+    "target_threshold_pct": 0.05,
+    "all_cache_targets_passed": true,
+    "all_allocator_audits_passed": true,
+    "overall_verification_status": "PASS"
+  }
+}

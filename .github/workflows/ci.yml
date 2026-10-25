@@ -1,0 +1,108 @@
+name: CI Matrix
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gfm-math-audit:
+    name: GFM KaTeX Math Compliance (21 Invariant Rules)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run GFM/KaTeX Math Linter
+        run: |
+          python scripts/audit_gfm_math.py README.md docs/STEALTH_INTEGRATION_GUIDE.md
+
+  rust-simd-tests:
+    name: Rust #![no_std] SIMD Arena & C-ABI
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu,wasm32-unknown-unknown
+
+      - name: Run Cargo Tests (Release Mode)
+        run: |
+          cargo test --manifest-path rust/triad_core_rs/Cargo.toml --release --verbose
+
+      - name: Build WASM32 Target
+        run: |
+          cargo build --manifest-path rust/triad_core_rs/Cargo.toml --target wasm32-unknown-unknown --release
+
+  python-parity-and-tests:
+    name: Python Oracle & C-ABI ctypes Parity
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Compile Native Shared Library
+        run: |
+          cargo build --manifest-path rust/triad_core_rs/Cargo.toml --release
+
+      - name: Install Python Test Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest numpy
+
+      - name: Verify Lean Theorem Numerical Bounds
+        run: |
+          python -c "from triad_core.operators import TriadCoreEngine; eng = TriadCoreEngine(); res = eng.verify_formal_theorems(); assert res['all_passed'], res"
+
+      - name: Verify Native Parity
+        run: |
+          python -c "from triad_core._native import verify_native_parity; assert verify_native_parity()['passed']"
+
+      - name: Run Pytest Test Suite
+        run: |
+          pytest tests/test_triad_core.py -v
+
+  bcm2712-cache-verification:
+    name: Broadcom BCM2712 Cache Simulation (<0.05% LLd Miss)
+    runs-on: ubuntu-latest
+    needs: [rust-simd-tests]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Shared Library
+        run: |
+          cargo build --manifest-path rust/triad_core_rs/Cargo.toml --release
+
+      - name: Run BCM2712 Cachegrind & Symbol Audit
+        run: |
+          python scripts/verify_bcm2712_arena.py

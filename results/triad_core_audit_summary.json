@@ -1,0 +1,71 @@
+{
+  "schema_version": "1.0.0",
+  "benchmark_suite": "TriadCore 6-Vertical Equivalence Benchmark (triad_core/benchmark.py)",
+  "timestamp_utc": "2026-10-25T06:04:38Z",
+  "protocol": "Mode B Blind Noise (SNR = 20 dB, 15% transient glints/washouts)",
+  "workloads": {
+    "01_eoir_optical_tracking": {
+      "workload": "01_eoir_optical_tracking",
+      "description": "EO/IR Optical Tracking under Mode B Blind Noise & Transient Glints",
+      "track_id_swaps": 0,
+      "glint_rejection_rate": 1.0,
+      "total_glints_injected": 1520,
+      "glints_quarantined": 1520,
+      "fps": 23676.9,
+      "target_fps": 5000.0,
+      "passed": true
+    },
+    "02_se2_robotic_contact_csp": {
+      "workload": "02_se2_robotic_contact_csp",
+      "description": "SE(2) Rigid Contact Graph Sheaf & Online so(16) Cayley Rotor",
+      "normal_interpenetration_residual": 0.0,
+      "so16_cayley_norm_drift": 0.0,
+      "adaptation_cycles_evaluated": 2000,
+      "contacts_projected": 500,
+      "passed": true
+    },
+    "03_lob_microstructure_spoofing": {
+      "workload": "03_lob_microstructure_spoofing",
+      "description": "L3 LOB Microstructure Spoofing Suppression & Deterministic Tie-Breaking",
+      "quote_stuffing_suppression_rate": 1.0,
+      "flicker_events_quarantined": 7500,
+      "h_clock_clean_ticks": 42500,
+      "deterministic_tie_breaking_drift": 0.0,
+      "passed": true
+    },
+    "04_anisotropic_so6_michell_ebe": {
+      "workload": "04_anisotropic_so6_michell_ebe",
+      "description": "Anisotropic SO(6) Kelvin-Mandel Rotor & Checkerboard Suppression",
+      "so6_trace_residual_f64": 2.842170943040401e-14,
+      "so6_trace_residual_f32": 7.62939453125e-06,
+      "target_trace_residual_f64": 1.14e-13,
+      "checkerboard_suppression_rate": 1.0,
+      "passed": true
+    },
+    "05_seismic_eew_morse_picker": {
+      "workload": "05_seismic_eew_morse_picker",
+      "description": "Seismic EEW Waveform Picking under 1,000 Extreme Glare Spikes",
+      "false_triggers": 0,
+      "glare_spikes_tested": 1000,
+      "glare_spikes_rejected": 1000,
+      "causal_deferral_latency_samples": 1,
+      "passed": true
+    },
+    "06_beltrami_mhd_flux_confinement": {
+      "workload": "06_beltrami_mhd_flux_confinement",
+      "description": "Beltrami MHD Magnetic Flux Confinement & Tangency Invariance",
+      "pointwise_flux_tangency_residual": 1.6653345369377348e-16,
+      "radial_flux_escape": 0.0,
+      "evaluations": 5000,
+      "target_flux_tangency": 1e-08,
+      "passed": true
+    }
+  },
+  "summary": {
+    "total_verticals": 6,
+    "passed_verticals": 6,
+    "failed_verticals": 0,
+    "all_passed": true,
+    "overall_status": "PASS"
+  }
+}
