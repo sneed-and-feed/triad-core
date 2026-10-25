@@ -13,7 +13,7 @@
 //! 7. Pairwise byte-disjoint, 64-byte aligned static arena < 1.2 MB (< 1,258,291 B) with zero heap
 //!    allocations (Theorem 2.11).
 
-#![cfg_attr(not(feature = "std"), no_std)]
+#![cfg_attr(not(any(feature = "std", test)), no_std)]
 #![allow(dead_code)]
 #![allow(unused_mut)]
 #![allow(unused_unsafe)]
@@ -24,7 +24,11 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
     loop {}
 }
 
-#[cfg(feature = "std")]
+#[cfg(all(not(feature = "std"), not(test), not(windows), not(target_arch = "wasm32")))]
+#[no_mangle]
+pub extern "C" fn rust_eh_personality() {}
+
+#[cfg(any(feature = "std", test))]
 extern crate std;
 
 // ============================================================================
@@ -797,8 +801,10 @@ pub fn exact_sphere_norm_ulp_polish(v: &mut [f32], target_sq: f32) {
         }
 
         if let Some((k1, c1, k2, c2)) = best_pair {
-            v[k1] = c1;
-            v[k2] = c2;
+            if k1 < v.len() && k2 < v.len() {
+                v[k1] = c1;
+                v[k2] = c2;
+            }
         }
     }
 }
@@ -806,16 +812,21 @@ pub fn exact_sphere_norm_ulp_polish(v: &mut [f32], target_sq: f32) {
 // Shell sort on 256 samples with Ciura gaps [132, 57, 23, 10, 4, 1]
 #[inline]
 pub fn sort_256(arr: &mut [f32; 256]) {
-    let gaps = [132, 57, 23, 10, 4, 1];
+    let gaps = [132usize, 57, 23, 10, 4, 1];
     for &gap in &gaps {
         for i in gap..256 {
-            let temp = arr[i];
+            let temp = arr[i & 255];
             let mut j = i;
-            while j >= gap && arr[j - gap] > temp {
-                arr[j] = arr[j - gap];
-                j -= gap;
+            while j >= gap {
+                let prev = arr[(j - gap) & 255];
+                if prev > temp {
+                    arr[j & 255] = prev;
+                    j -= gap;
+                } else {
+                    break;
+                }
             }
-            arr[j] = temp;
+            arr[j & 255] = temp;
         }
     }
 }
@@ -2072,16 +2083,15 @@ pub unsafe extern "C" fn contact_sheaf_se2_step_f32(
     let mut visited = [false; MAX_CONTACT_NODES];
     let mut queue = [0u32; MAX_CONTACT_NODES];
     let mut q_head = 0;
-    let mut q_tail = 0;
+    let mut q_tail = 1;
 
     let start_node = ego_id % (n_nodes as u32);
-    queue[q_tail] = start_node;
-    q_tail += 1;
-    visited[start_node as usize] = true;
+    queue[0] = start_node;
+    visited[(start_node as usize) & (MAX_CONTACT_NODES - 1)] = true;
 
     let mut hit_wall = false;
 
-    while q_head < q_tail {
+    while q_head < q_tail && q_head < MAX_CONTACT_NODES {
         let cur = queue[q_head];
         q_head += 1;
 
@@ -2098,7 +2108,7 @@ pub unsafe extern "C" fn contact_sheaf_se2_step_f32(
                     let v = edge.v;
                     let dot = edge.normal_x * dx + edge.normal_y * dy;
                     if dot > 0.0 || edge.edge_type == 1 {
-                        let v_usize = (v as usize) % n_nodes;
+                        let v_usize = ((v as usize) % n_nodes) & (MAX_CONTACT_NODES - 1);
                         if !visited[v_usize] {
                             visited[v_usize] = true;
                             if q_tail < MAX_CONTACT_NODES {
@@ -2118,7 +2128,8 @@ pub unsafe extern "C" fn contact_sheaf_se2_step_f32(
         if !out_dy.is_null() { *out_dy = 0.0; }
     } else {
         // Propagate displacement to all components in active sheaf
-        for &q_nid in &queue[..q_tail] {
+        let tail_bounded = q_tail.min(MAX_CONTACT_NODES);
+        for &q_nid in &queue[..tail_bounded] {
             let nid = q_nid as usize;
             let node = &mut *nodes.add(nid);
             node.vx = dx;

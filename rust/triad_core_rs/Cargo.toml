@@ -11,11 +11,15 @@ crate-type = ["cdylib", "rlib", "staticlib"]
 doctest = false
 
 [features]
-default = ["std"]
+default = []
 std = []
+
+[profile.dev]
+panic = "abort"
 
 [profile.release]
 opt-level = 3
 lto = true
 codegen-units = 1
 panic = "abort"
+

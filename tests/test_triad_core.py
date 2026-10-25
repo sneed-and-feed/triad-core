@@ -601,4 +601,61 @@ class TestEdgeCasesAndStealthIntegration:
         with pytest.raises(ValueError):
             nat_clutter(np.ones(16, dtype=np.float32), np.ones(15, dtype=np.float32))
 
+    def test_bcm2712_elf64_symbol_audit_and_fallback_verifier(self, tmp_path, monkeypatch):
+        """Verifies ELF64 symbol-table allocator auditing, substring immunity, and Python fallback."""
+        import struct
+        import sys
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+        import verify_bcm2712_arena as v
+
+        # 1. Non-ELF binary containing 'Allocation-free' docstring must NOT trigger 'free' false positive,
+        #    while null-delimited '\x00malloc@GLIBC_2.2.5\x00' MUST be detected.
+        clean_bin = tmp_path / "libclean.dylib"
+        clean_bin.write_bytes(b"HEADER\x00Allocation-free #![no_std] arena\x00skew_triad_step_f32\x00")
+        res_clean = v.static_audit_binary(str(clean_bin))
+        assert res_clean["dynamic_allocations_detected"] == 0
+        assert res_clean["status"] == "ZERO_DYNAMIC_ALLOCATIONS_VERIFIED"
+
+        dirty_bin = tmp_path / "libdirty.dylib"
+        dirty_bin.write_bytes(b"HEADER\x00malloc@GLIBC_2.2.5\x00__rust_alloc\x00")
+        res_dirty = v.static_audit_binary(str(dirty_bin))
+        assert res_dirty["dynamic_allocations_detected"] == 2
+        assert res_dirty["heap_allocators_imported"] == ["__rust_alloc", "malloc"]
+        assert res_dirty["status"] == "ALLOCATOR_DETECTED"
+
+        # 2. Construct minimal valid ELF64 binary with .dynsym + .dynstr
+        dynstr = b"\x00skew_triad_step_f32\x00so_skew_tiebreaker_f32\x00memcpy@GLIBC_2.14\x00"
+        # 4 symbols: null, skew_triad_step_f32 (defined, shndx=1), so_skew_tiebreaker_f32 (defined, shndx=1), memcpy (undef, shndx=0)
+        dynsym = (
+            struct.pack("<IBBHQQ", 0, 0, 0, 0, 0, 0)
+            + struct.pack("<IBBHQQ", 1, 0x12, 0, 1, 0x1000, 32)
+            + struct.pack("<IBBHQQ", 21, 0x12, 0, 1, 0x1020, 32)
+            + struct.pack("<IBBHQQ", 44, 0x10, 0, 0, 0, 0)
+        )
+        ehdr_size = 64
+        dynstr_off = ehdr_size
+        dynsym_off = dynstr_off + len(dynstr)
+        shdr_off = dynsym_off + len(dynsym)
+        sh_null = struct.pack("<IIQQQQIIQQ", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+        sh_dynstr = struct.pack("<IIQQQQIIQQ", 1, 3, 0, 0, dynstr_off, len(dynstr), 0, 0, 1, 0)
+        sh_dynsym = struct.pack("<IIQQQQIIQQ", 2, 11, 0, 0, dynsym_off, len(dynsym), 1, 0, 8, 24)
+        ehdr = (
+            b"\x7fELF\x02\x01\x01" + b"\x00" * 9
+            + struct.pack("<HHIQQQIHHHHHH", 3, 62, 1, 0, 0, shdr_off, 0, 64, 0, 0, 64, 3, 0)
+        )
+        elf_clean_path = tmp_path / "libtriad_clean.so"
+        elf_clean_path.write_bytes(ehdr + dynstr + dynsym + sh_null + sh_dynstr + sh_dynsym)
+        res_elf = v.static_audit_binary(str(elf_clean_path))
+        assert res_elf["dynamic_allocations_detected"] == 0
+        assert "skew_triad_step_f32" in res_elf["stepping_symbols_verified"]
+        assert "so_skew_tiebreaker_f32" in res_elf["stealth_symbols_verified"]
+
+        # 3. Verify Python fallback simulator conserves hits/misses and passes < 0.05% LLd miss rate
+        monkeypatch.setattr(v, "build_or_load_rust_kernel", lambda: None)
+        out_json = tmp_path / "fallback_receipts.json"
+        receipts = v.verify_bcm2712_arena(num_references=50_000_000, output_path=str(out_json))
+        assert receipts["summary"]["all_cache_targets_passed"] is True
+        assert receipts["summary"]["all_allocator_audits_passed"] is True
+        assert receipts["arenas"]["triad_core"]["lld_miss_rate_pct"] < 0.05
+
 

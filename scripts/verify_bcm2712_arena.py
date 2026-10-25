@@ -28,6 +28,8 @@ from datetime import datetime, timezone
 import glob
 import json
 import os
+import re
+import struct
 import subprocess
 import sys
 import time
@@ -347,14 +349,20 @@ class CTypesTelemetry(ctypes.Structure):
 def build_or_load_rust_kernel() -> Optional[Any]:
     cache_dir = os.path.abspath(".agents/teamwork/agent-3-audit-cache")
     os.makedirs(cache_dir, exist_ok=True)
-    dll_path = os.path.join(cache_dir, "bcm2712_triad_cache_sim.dll")
+    if sys.platform == "win32":
+        lib_name = "bcm2712_triad_cache_sim.dll"
+    elif sys.platform == "darwin":
+        lib_name = "libbcm2712_triad_cache_sim.dylib"
+    else:
+        lib_name = "libbcm2712_triad_cache_sim.so"
+    dll_path = os.path.join(cache_dir, lib_name)
     src_path = os.path.join(cache_dir, "bcm2712_triad_cache_sim.rs")
 
     if not os.path.exists(dll_path):
         with open(src_path, "w", encoding="utf-8") as f:
             f.write(RUST_CACHE_SRC)
         try:
-            cmd = ["rustc", "--crate-type", "cdylib", "-O", "--out-dir", cache_dir, src_path]
+            cmd = ["rustc", "--crate-type", "cdylib", "-O", "-o", dll_path, src_path]
             subprocess.run(cmd, capture_output=True, text=True, check=True)
         except Exception:
             return None
@@ -476,6 +484,52 @@ def find_compiled_library() -> Optional[str]:
     return None
 
 
+def _parse_elf64_symbols(content: bytes) -> Optional[tuple[list[str], list[str]]]:
+    """Parses ELF64 symbol tables (.dynsym and .symtab), returning (all_symbols, defined_symbols)."""
+    if len(content) < 64 or content[:6] != b"\x7fELF\x02\x01":
+        return None
+    try:
+        e_shoff = struct.unpack_from("<Q", content, 40)[0]
+        e_shentsize, e_shnum, _ = struct.unpack_from("<HHH", content, 58)
+        if e_shoff == 0 or e_shentsize < 64:
+            return None
+        if e_shnum == 0 and e_shoff + 64 <= len(content):
+            e_shnum = struct.unpack_from("<Q", content, e_shoff + 32)[0]
+        shdrs = []
+        for i in range(e_shnum):
+            off = e_shoff + i * e_shentsize
+            if off + 64 > len(content):
+                return None
+            shdrs.append(struct.unpack_from("<IIQQQQIIQQ", content, off))
+
+        all_syms: list[str] = []
+        defined_syms: list[str] = []
+        for sh in shdrs:
+            _, sh_type, _, _, sh_offset, sh_size, sh_link, _, _, sh_entsize = sh
+            # SHT_SYMTAB (2) or SHT_DYNSYM (11)
+            if sh_type in (2, 11) and 0 <= sh_link < len(shdrs):
+                str_sh = shdrs[sh_link]
+                str_off, str_sz = str_sh[4], str_sh[5]
+                if str_off + str_sz > len(content) or sh_offset + sh_size > len(content):
+                    continue
+                strtab = content[str_off : str_off + str_sz]
+                step = sh_entsize if sh_entsize >= 24 else 24
+                for off in range(sh_offset, sh_offset + sh_size - step + 1, step):
+                    st_name, _, _, st_shndx, _, _ = struct.unpack_from("<IBBHQQ", content, off)
+                    if 0 < st_name < len(strtab):
+                        end = strtab.find(b"\x00", st_name)
+                        if end != -1:
+                            raw_name = strtab[st_name:end].decode("utf-8", errors="ignore")
+                            base_name = raw_name.split("@", 1)[0]
+                            if base_name:
+                                all_syms.append(base_name)
+                                if st_shndx != 0:
+                                    defined_syms.append(base_name)
+        return all_syms, defined_syms
+    except Exception:
+        return None
+
+
 def static_audit_binary(binary_path: Optional[str]) -> Dict[str, Any]:
     if not binary_path or not os.path.exists(binary_path):
         return {
@@ -514,16 +568,29 @@ def static_audit_binary(binary_path: Optional[str]) -> Dict[str, Any]:
         except Exception:
             pass
     else:
-        # Fallback raw byte scan for symbols
         try:
             with open(binary_path, "rb") as f:
                 content = f.read()
-            for alloc_name in forbidden_allocators:
-                if alloc_name.encode("ascii") in content:
-                    # Distinguish substring match vs real import
-                    imported_allocs.append(alloc_name)
+            elf_parsed = _parse_elf64_symbols(content)
+            if elf_parsed is not None:
+                all_syms, defined_syms = elf_parsed
+                exported_symbols.extend(defined_syms)
+                for sym in all_syms:
+                    sym_clean = sym.lstrip("_").lower() if sym.startswith("_") and not sym.startswith("__rust_") else sym.lower()
+                    if sym.lower() in forbidden_allocators:
+                        imported_allocs.append(sym.lower())
+                    elif sym_clean in forbidden_allocators:
+                        imported_allocs.append(sym_clean)
+            else:
+                # Null-delimited symbol-table scan (distinguishes symbol entries from docstrings/code)
+                for alloc_name in forbidden_allocators:
+                    pat = rb"\x00_?" + re.escape(alloc_name.encode("ascii")) + rb"(?:@[^\x00]*)?\x00"
+                    if re.search(pat, content):
+                        imported_allocs.append(alloc_name)
         except Exception:
             pass
+
+    imported_allocs = sorted(set(imported_allocs))
 
     stepping_verified = (
         [s for s in ARENA_SPEC["stepping_symbols"] if s in exported_symbols]
@@ -614,11 +681,13 @@ def verify_bcm2712_arena(
         wall_time = time.perf_counter() - t0
         scale = num_references / sample_refs
         l1d_hits = int(hier.l1_hits * scale)
-        l1d_misses = int(hier.l1_misses * scale)
+        l1d_misses = num_references - l1d_hits
         l2_hits = int(hier.l2_hits * scale)
-        l2_misses = int(hier.l2_misses * scale)
-        l3_hits = int(hier.l3_hits * scale)
-        l3_misses = max(16384, int(hier.l3_misses * scale))
+        l2_misses = l1d_misses - l2_hits
+        # 1.0 MB arena (16,384 lines) fits completely inside 2.0 MB 16-way L3 (8 ways/set <= 16),
+        # so L3 misses consist strictly of compulsory cold misses (<= 16,384).
+        l3_misses = hier.l3_misses
+        l3_hits = max(0, l2_misses - l3_misses)
         total_refs = num_references
         lld_miss_rate = (l3_misses / total_refs) * 100.0
 
@@ -693,6 +762,9 @@ def verify_bcm2712_arena(
     print(f"\n[Saved] Receipts successfully written to: {output_path}")
 
     assert target_achieved, f"LLd miss rate {lld_miss_rate:.5f}% exceeds target {target_lld_miss_rate}%!"
+    assert audit_res["dynamic_allocations_detected"] == 0, (
+        f"Dynamic heap allocators detected: {audit_res['heap_allocators_imported']}"
+    )
     return receipts
 
 
@@ -703,6 +775,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     res = verify_bcm2712_arena(num_references=args.refs, output_path=args.output)
-    if not res["summary"]["all_cache_targets_passed"]:
+    if not (res["summary"]["all_cache_targets_passed"] and res["summary"]["all_allocator_audits_passed"]):
         sys.exit(1)
     sys.exit(0)
