@@ -68,28 +68,11 @@ theorem triad_pointwise_orthogonal {M : ℕ} (W : Fin M → Fin M → Fin M → 
     (u v : Fin M → ℝ) :
     shellInner v (triadOperator W u v) = 0 := by
   unfold shellInner triadOperator
-  simp_rw [mul_sum]
-  rw [Finset.sum_comm]
-  apply Finset.sum_eq_zero
-  intro i _
-  have h_sub :
-      (∑ k : Fin M, ∑ j : Fin M, v k * (u i * v j * (W i j k - W i k j))) =
-      (∑ k : Fin M, ∑ j : Fin M, u i * v j * v k * W i j k) -
-      (∑ k : Fin M, ∑ j : Fin M, u i * v j * v k * W i k j) := by
-     rw [← Finset.sum_sub_distrib]
-     apply Finset.sum_congr rfl; intro k _
-     rw [← Finset.sum_sub_distrib]
-     apply Finset.sum_congr rfl; intro j _
-     ring
-  rw [h_sub]
-  have h_swap :
-      (∑ k : Fin M, ∑ j : Fin M, u i * v j * v k * W i j k) =
-      (∑ k : Fin M, ∑ j : Fin M, u i * v j * v k * W i k j) := by
-    rw [Finset.sum_comm]
-    apply Finset.sum_congr rfl; intro j _
-    apply Finset.sum_congr rfl; intro k _
-    ring
-  linarith
+  simp_rw [mul_sum]; rw [sum_comm]
+  refine sum_eq_zero fun i _ => ?_
+  simp_rw [mul_sub, sum_sub_distrib, sub_eq_zero]
+  rw [sum_comm]
+  exact sum_congr rfl fun j _ => sum_congr rfl fun k _ => by ring
 
 /-! ### Theorem 2.1: Skew-Symmetric Color-Occlusion Antisymmetry -/
 
@@ -117,12 +100,9 @@ def postLogit (C : ℕ) (ℓ_sym : Fin C → ℝ) (W : Fin C → Fin C → Fin C
   ℓ_sym k + triadOperator W u v k
 
 lemma triadOperator_two_color_eval {C : ℕ} (W : Fin C → Fin C → Fin C → ℝ)
-    (u v : Fin C → ℝ) (i₀ c₁ c₂ k : Fin C) (α β : ℝ)
-    (hc : c₁ ≠ c₂)
-    (hu_i0 : u i₀ = β)
-    (hu_other : ∀ i : Fin C, i ≠ i₀ → u i = 0)
-    (hv_c1 : v c₁ = α)
-    (hv_c2 : v c₂ = α)
+    (u v : Fin C → ℝ) (i₀ c₁ c₂ k : Fin C) (α β : ℝ) (hc : c₁ ≠ c₂)
+    (hu_i0 : u i₀ = β) (hu_other : ∀ i : Fin C, i ≠ i₀ → u i = 0)
+    (hv_c1 : v c₁ = α) (hv_c2 : v c₂ = α)
     (hv_other : ∀ c : Fin C, c ≠ c₁ → c ≠ c₂ → v c = 0) :
     triadOperator W u v k =
       β * α * (W i₀ c₁ k - W i₀ k c₁) + β * α * (W i₀ c₂ k - W i₀ k c₂) := by
@@ -145,12 +125,9 @@ strictly breaking the tie whenever $W(i_0, c_2, c_1) > W(i_0, c_1, c_2)$. -/
 theorem occlusion_triad_breaks_symmetric_tie {C : ℕ}
     (ℓ_sym : Fin C → ℝ) (W : Fin C → Fin C → Fin C → ℝ)
     (u v : Fin C → ℝ) (i₀ c₁ c₂ : Fin C) (α β : ℝ)
-    (hα : 0 < α) (hβ : 0 < β)
-    (h_tie : ℓ_sym c₁ = ℓ_sym c₂)
-    (hu_i0 : u i₀ = β)
-    (hu_other : ∀ i : Fin C, i ≠ i₀ → u i = 0)
-    (hv_c1 : v c₁ = α)
-    (hv_c2 : v c₂ = α)
+    (hα : 0 < α) (hβ : 0 < β) (h_tie : ℓ_sym c₁ = ℓ_sym c₂)
+    (hu_i0 : u i₀ = β) (hu_other : ∀ i : Fin C, i ≠ i₀ → u i = 0)
+    (hv_c1 : v c₁ = α) (hv_c2 : v c₂ = α)
     (hv_other : ∀ c : Fin C, c ≠ c₁ → c ≠ c₂ → v c = 0) :
     (postLogit C ℓ_sym W u v c₁ - postLogit C ℓ_sym W u v c₂ =
       2 * β * α * (W i₀ c₂ c₁ - W i₀ c₁ c₂)) ∧
@@ -178,8 +155,7 @@ theorem darksnail_readout_energy_conservation {C M : ℕ}
     (W_rec : Fin M → Fin M → Fin M → ℝ) (z_H z_L : Fin M → ℝ) :
     (∑ k : Fin C, v k * triadOperator W u v k) = 0 ∧
     shellInner z_L (triadOperator W_rec z_H z_L) = 0 :=
-  ⟨triad_pointwise_orthogonal W u v,
-   triad_pointwise_orthogonal W_rec z_H z_L⟩
+  ⟨triad_pointwise_orthogonal W u v, triad_pointwise_orthogonal W_rec z_H z_L⟩
 
 /-! ### Theorem 2.4: Step-0 System 1 Homotopy Equivalence -/
 
@@ -200,23 +176,15 @@ theorem darksnail_step0_system1_homotopy {C : ℕ}
 noncomputable def rot2 (θ : ℝ) (v : ℝ × ℝ) : ℝ × ℝ :=
   (Real.cos θ * v.1 - Real.sin θ * v.2, Real.sin θ * v.1 + Real.cos θ * v.2)
 
-def inner2 (u v : ℝ × ℝ) : ℝ :=
-  u.1 * v.1 + u.2 * v.2
-
-def normSq2 (v : ℝ × ℝ) : ℝ :=
-  inner2 v v
+def inner2 (u v : ℝ × ℝ) : ℝ := u.1 * v.1 + u.2 * v.2
+def normSq2 (v : ℝ × ℝ) : ℝ := inner2 v v
 
 noncomputable def rope2d (θ_y θ_x : ℝ) (q_y q_x : ℝ × ℝ) : (ℝ × ℝ) × (ℝ × ℝ) :=
   (rot2 θ_y q_y, rot2 θ_x q_x)
 
-def inner2d (u v : (ℝ × ℝ) × (ℝ × ℝ)) : ℝ :=
-  inner2 u.1 v.1 + inner2 u.2 v.2
-
-def normSq2d (v : (ℝ × ℝ) × (ℝ × ℝ)) : ℝ :=
-  normSq2 v.1 + normSq2 v.2
-
-noncomputable def avg2 (u v : ℝ × ℝ) : ℝ × ℝ :=
-  ((u.1 + v.1) / 2, (u.2 + v.2) / 2)
+def inner2d (u v : (ℝ × ℝ) × (ℝ × ℝ)) : ℝ := inner2 u.1 v.1 + inner2 u.2 v.2
+def normSq2d (v : (ℝ × ℝ) × (ℝ × ℝ)) : ℝ := normSq2 v.1 + normSq2 v.2
+noncomputable def avg2 (u v : ℝ × ℝ) : ℝ × ℝ := ((u.1 + v.1) / 2, (u.2 + v.2) / 2)
 
 noncomputable def rope2dPatchAvg (θ_y1 θ_x1 θ_y2 θ_x2 : ℝ) (k_y k_x : ℝ × ℝ) : (ℝ × ℝ) × (ℝ × ℝ) :=
   (avg2 (rot2 θ_y1 k_y) (rot2 θ_y2 k_y), avg2 (rot2 θ_x1 k_x) (rot2 θ_x2 k_x))
@@ -238,24 +206,13 @@ theorem rope2d_medoid_relative_invariance
 lemma normSq2_avg2_rot2 (θ₁ θ₂ : ℝ) (k : ℝ × ℝ) :
     normSq2 (avg2 (rot2 θ₁ k) (rot2 θ₂ k)) =
       normSq2 k * (1 + Real.cos (θ₁ - θ₂)) / 2 := by
-  unfold normSq2 inner2 avg2 rot2
-  rw [Real.cos_sub]
+  unfold normSq2 inner2 avg2 rot2; rw [Real.cos_sub]
   linear_combination
     ((k.1 ^ 2 + k.2 ^ 2) / 4) * Real.cos_sq_add_sin_sq θ₁ +
     ((k.1 ^ 2 + k.2 ^ 2) / 4) * Real.cos_sq_add_sin_sq θ₂
 
 lemma normSq2_nonneg (k : ℝ × ℝ) : 0 ≤ normSq2 k :=
   add_nonneg (mul_self_nonneg k.1) (mul_self_nonneg k.2)
-
-lemma normSq2_avg2_rot2_le (θ₁ θ₂ : ℝ) (k : ℝ × ℝ) :
-    normSq2 (avg2 (rot2 θ₁ k) (rot2 θ₂ k)) ≤ normSq2 k := by
-  rw [normSq2_avg2_rot2]
-  nlinarith [Real.cos_le_one (θ₁ - θ₂), normSq2_nonneg k]
-
-lemma normSq2_avg2_rot2_lt (θ₁ θ₂ : ℝ) (k : ℝ × ℝ)
-    (hcos : Real.cos (θ₁ - θ₂) < 1) (hk : 0 < normSq2 k) :
-    normSq2 (avg2 (rot2 θ₁ k) (rot2 θ₂ k)) < normSq2 k := by
-  rw [normSq2_avg2_rot2]; nlinarith
 
 /-- **Theorem 2.5b (`rope2d_arithmetic_norm_lt`)**:
 Arithmetic patch averaging across distinct grid phases strictly attenuates 2D key norm:
@@ -265,10 +222,13 @@ theorem rope2d_arithmetic_norm_lt
     (h_att : (Real.cos (θ_y1 - θ_y2) < 1 ∧ 0 < normSq2 k_y) ∨
              (Real.cos (θ_x1 - θ_x2) < 1 ∧ 0 < normSq2 k_x)) :
     normSq2d (rope2dPatchAvg θ_y1 θ_x1 θ_y2 θ_x2 k_y k_x) < normSq2d (k_y, k_x) := by
-  unfold normSq2d rope2dPatchAvg
-  rcases h_att with ⟨hcy, hky⟩ | ⟨hcx, hkx⟩
-  · linarith [normSq2_avg2_rot2_lt θ_y1 θ_y2 k_y hcy hky, normSq2_avg2_rot2_le θ_x1 θ_x2 k_x]
-  · linarith [normSq2_avg2_rot2_le θ_y1 θ_y2 k_y, normSq2_avg2_rot2_lt θ_x1 θ_x2 k_x hcx hkx]
+  unfold normSq2d rope2dPatchAvg; dsimp only
+  rw [normSq2_avg2_rot2, normSq2_avg2_rot2]
+  have hy := normSq2_nonneg k_y
+  have hx := normSq2_nonneg k_x
+  have hcy := Real.cos_le_one (θ_y1 - θ_y2)
+  have hcx := Real.cos_le_one (θ_x1 - θ_x2)
+  rcases h_att with ⟨h1, h2⟩ | ⟨h1, h2⟩ <;> nlinarith
 
 /-! ### Theorem 2.6: Multi-Step Unrolled Slow-Fast Spherical Invariance -/
 
@@ -281,20 +241,16 @@ noncomputable def sphericalRetract {M : ℕ} (v v_upd : Fin M → ℝ) (k : Fin 
 
 noncomputable def sphericalTriadStep (M : ℕ) (γ : ℝ) (W_rec : Fin M → Fin M → Fin M → ℝ)
     (u v : Fin M → ℝ) : Fin M → ℝ :=
-  let δv := tangentTriadStep M γ W_rec u v
-  sphericalRetract v (fun k => v k + δv k)
+  sphericalRetract v (fun k => v k + tangentTriadStep M γ W_rec u v k)
 
 noncomputable def multistepSphericalTriad (M : ℕ) (γ : ℕ → ℝ)
     (W_rec : ℕ → Fin M → Fin M → Fin M → ℝ)
     (u : ℕ → Fin M → ℝ) (v₀ : Fin M → ℝ) : ℕ → (Fin M → ℝ)
   | 0 => v₀
-  | t + 1 =>
-      let v_t := multistepSphericalTriad M γ W_rec u v₀ t
-      sphericalTriadStep M (γ t) (W_rec t) (u t) v_t
+  | t + 1 => sphericalTriadStep M (γ t) (W_rec t) (u t) (multistepSphericalTriad M γ W_rec u v₀ t)
 
-lemma shellEnergy_nonneg {M : ℕ} (x : Fin M → ℝ) : 0 ≤ shellEnergy x := by
-  unfold shellEnergy shellInner
-  exact Finset.sum_nonneg fun k _ => mul_self_nonneg (x k)
+lemma shellEnergy_nonneg {M : ℕ} (x : Fin M → ℝ) : 0 ≤ shellEnergy x :=
+  Finset.sum_nonneg (s := Finset.univ) fun k _ => mul_self_nonneg (x k)
 
 lemma shellEnergy_eq_zero_iff {M : ℕ} (x : Fin M → ℝ) :
     shellEnergy x = 0 ↔ ∀ k : Fin M, x k = 0 := by
@@ -304,12 +260,11 @@ lemma shellEnergy_eq_zero_iff {M : ℕ} (x : Fin M → ℝ) :
 lemma tangentTriadStep_orthogonal {M : ℕ} (γ : ℝ) (W_rec : Fin M → Fin M → Fin M → ℝ)
     (u v : Fin M → ℝ) :
     shellInner v (tangentTriadStep M γ W_rec u v) = 0 := by
-  calc shellInner v (tangentTriadStep M γ W_rec u v)
-    _ = γ * shellInner v (triadOperator W_rec u v) := by
-        unfold shellInner tangentTriadStep
-        rw [Finset.mul_sum]
-        exact Finset.sum_congr rfl fun k _ => by ring
-    _ = 0 := by rw [triad_pointwise_orthogonal, mul_zero]
+  have h : shellInner v (tangentTriadStep M γ W_rec u v) =
+      γ * shellInner v (triadOperator W_rec u v) := by
+    unfold shellInner tangentTriadStep; rw [Finset.mul_sum]
+    exact Finset.sum_congr rfl fun k _ => by ring
+  rw [h, triad_pointwise_orthogonal, mul_zero]
 
 lemma shellEnergy_add_of_orthogonal {M : ℕ} (v δv : Fin M → ℝ)
     (h_orth : shellInner v δv = 0) :
@@ -324,22 +279,19 @@ lemma shellEnergy_add_of_orthogonal {M : ℕ} (v δv : Fin M → ℝ)
 
 lemma shellEnergy_scale {M : ℕ} (c : ℝ) (x : Fin M → ℝ) :
     shellEnergy (fun k => c * x k) = c ^ 2 * shellEnergy x := by
-  unfold shellEnergy shellInner
-  rw [Finset.mul_sum]
+  unfold shellEnergy shellInner; rw [Finset.mul_sum]
   exact Finset.sum_congr rfl fun k _ => by ring
 
 lemma sphericalTriadStep_preserves_energy {M : ℕ} (γ : ℝ)
     (W_rec : Fin M → Fin M → Fin M → ℝ) (u v : Fin M → ℝ) :
     shellEnergy (sphericalTriadStep M γ W_rec u v) = shellEnergy v := by
   unfold sphericalTriadStep sphericalRetract
-  dsimp only
   rw [shellEnergy_scale]
   by_cases hv0 : shellEnergy v = 0
   · simp [hv0]
   · have hv_nonneg := shellEnergy_nonneg v
     have h_pyth := shellEnergy_add_of_orthogonal v _ (tangentTriadStep_orthogonal γ W_rec u v)
-    have h_upd_pos :
-        0 < shellEnergy (fun k => v k + tangentTriadStep M γ W_rec u v k) := by
+    have h_upd_pos : 0 < shellEnergy (fun k => v k + tangentTriadStep M γ W_rec u v k) := by
       linarith [lt_of_le_of_ne hv_nonneg (Ne.symm hv0),
                 shellEnergy_nonneg (tangentTriadStep M γ W_rec u v)]
     rw [div_pow, Real.sq_sqrt hv_nonneg, Real.sq_sqrt (le_of_lt h_upd_pos),
@@ -367,8 +319,7 @@ lemma sphericalTriadStep_zero {M : ℕ} (γ : ℝ) (u v : Fin M → ℝ) :
   have h_tan : (fun i => v i + tangentTriadStep M γ 0 u v i) = v := by
     funext i; simp [tangentTriadStep, triadOperator]
   unfold sphericalTriadStep sphericalRetract
-  dsimp only
-  rw [h_tan, congr_fun h_tan k]
+  rw [h_tan]
   by_cases hv0 : shellEnergy v = 0
   · simp [hv0, (shellEnergy_eq_zero_iff v).mp hv0 k]
   · have hv_pos := lt_of_le_of_ne (shellEnergy_nonneg v) (Ne.symm hv0)
@@ -414,18 +365,15 @@ def elasticEnergy6 (C : Fin 6 → Fin 6 → ℝ) (ε : Fin 6 → ℝ) : ℝ :=
 def matVec6 (M : Fin 6 → Fin 6 → ℝ) (x : Fin 6 → ℝ) (i : Fin 6) : ℝ :=
   ∑ j : Fin 6, M i j * x j
 
-def matTranspose6 (M : Fin 6 → Fin 6 → ℝ) (i j : Fin 6) : ℝ :=
-  M j i
+def matTranspose6 (M : Fin 6 → Fin 6 → ℝ) (i j : Fin 6) : ℝ := M j i
 
 def rotateStiffness6 (M C : Fin 6 → Fin 6 → ℝ) (i j : Fin 6) : ℝ :=
   ∑ k : Fin 6, ∑ l : Fin 6, M i k * C k l * M j l
 
-def trace6 (C : Fin 6 → Fin 6 → ℝ) : ℝ :=
-  ∑ i : Fin 6, C i i
+def trace6 (C : Fin 6 → Fin 6 → ℝ) : ℝ := ∑ i : Fin 6, C i i
 
 def IsOrthogonal6 (M : Fin 6 → Fin 6 → ℝ) : Prop :=
-  ∀ x : Fin 6 → ℝ,
-    shellEnergy (matVec6 (matTranspose6 M) x) = shellEnergy x
+  ∀ x : Fin 6 → ℝ, shellEnergy (matVec6 (matTranspose6 M) x) = shellEnergy x
 
 def IsColOrthonormal6 (M : Fin 6 → Fin 6 → ℝ) : Prop :=
   ∀ k l : Fin 6, (∑ i : Fin 6, M i k * M i l) = if k = l then 1 else 0
@@ -434,9 +382,7 @@ def IsRowOrthonormal6 (M : Fin 6 → Fin 6 → ℝ) : Prop :=
   ∀ i j : Fin 6, (∑ k : Fin 6, M i k * M j k) = if i = j then 1 else 0
 
 lemma isOrthogonal6_of_rowOrthonormal6 (M : Fin 6 → Fin 6 → ℝ)
-    (hM : IsRowOrthonormal6 M) :
-    IsOrthogonal6 M := by
-  intro x
+    (hM : IsRowOrthonormal6 M) : IsOrthogonal6 M := fun x => by
   unfold shellEnergy shellInner matVec6 matTranspose6
   calc (∑ k : Fin 6, (∑ i : Fin 6, M i k * x i) * (∑ j : Fin 6, M j k * x j))
     _ = ∑ i : Fin 6, ∑ j : Fin 6, x i * x j * (∑ k : Fin 6, M i k * M j k) := by
@@ -496,18 +442,14 @@ theorem elasticEnergy6_rotateStiffness6 (M C : Fin 6 → Fin 6 → ℝ) (ε : Fi
 /-- **Theorem 2.7b (`so6_stiffness_preserves_pos_def`)**:
 Orthogonal Kelvin-Mandel rotation preserves coercivity lower bounds and strict positive-definiteness. -/
 theorem so6_stiffness_preserves_pos_def (M C : Fin 6 → Fin 6 → ℝ) (μ_min : ℝ)
-    (hM : IsOrthogonal6 M)
-    (hμ : 0 < μ_min)
-    (h_coercive : ∀ ξ : Fin 6 → ℝ,
-      μ_min * shellEnergy ξ ≤ elasticEnergy6 C ξ) :
-    (∀ ε : Fin 6 → ℝ,
-      μ_min * shellEnergy ε ≤ elasticEnergy6 (rotateStiffness6 M C) ε) ∧
+    (hM : IsOrthogonal6 M) (hμ : 0 < μ_min)
+    (h_coercive : ∀ ξ : Fin 6 → ℝ, μ_min * shellEnergy ξ ≤ elasticEnergy6 C ξ) :
+    (∀ ε : Fin 6 → ℝ, μ_min * shellEnergy ε ≤ elasticEnergy6 (rotateStiffness6 M C) ε) ∧
     (∀ ε : Fin 6 → ℝ, (∃ i : Fin 6, ε i ≠ 0) →
       0 < elasticEnergy6 (rotateStiffness6 M C) ε) := by
   have h_bound : ∀ ε : Fin 6 → ℝ,
       μ_min * shellEnergy ε ≤ elasticEnergy6 (rotateStiffness6 M C) ε := fun ε => by
-    rw [elasticEnergy6_rotateStiffness6, ← hM ε]
-    exact h_coercive _
+    rw [elasticEnergy6_rotateStiffness6, ← hM ε]; exact h_coercive _
   refine ⟨h_bound, fun ε ⟨i, hi⟩ => lt_of_lt_of_le (mul_pos hμ ?_) (h_bound ε)⟩
   exact lt_of_le_of_ne (shellEnergy_nonneg ε) fun h => hi ((shellEnergy_eq_zero_iff ε).mp h.symm i)
 
@@ -526,9 +468,7 @@ def deltaMinus (v : ℤ → ℝ) (z : ℤ) : ℝ := v z - v (z - 1)
 def deltaPlus (v : ℤ → ℝ) (z : ℤ) : ℝ := v z - v (z + 1)
 def morseImpulseProd (v : ℤ → ℝ) (z : ℤ) : ℝ := deltaMinus v z * deltaPlus v z
 def isMorseImpulse (v : ℤ → ℝ) (z : ℤ) : Prop := 0 < morseImpulseProd v z
-
-noncomputable def laplacian3pt (v : ℤ → ℝ) (z : ℤ) : ℝ :=
-  (deltaMinus v z + deltaPlus v z) / 2
+noncomputable def laplacian3pt (v : ℤ → ℝ) (z : ℤ) : ℝ := (deltaMinus v z + deltaPlus v z) / 2
 
 /-- **Theorem 2.7d (`morseImpulse_iff_strict_extremum`)**:
 3-point discrete Morse impulse triggers if and only if z is a strict local extremum. -/
@@ -536,8 +476,7 @@ theorem morseImpulse_iff_strict_extremum (v : ℤ → ℝ) (z : ℤ) :
     isMorseImpulse v z ↔
       (v (z - 1) < v z ∧ v (z + 1) < v z) ∨ (v z < v (z - 1) ∧ v z < v (z + 1)) := by
   unfold isMorseImpulse morseImpulseProd deltaMinus deltaPlus
-  rw [mul_pos_iff]
-  simp only [sub_pos, sub_neg]
+  rw [mul_pos_iff]; simp only [sub_pos, sub_neg]
 
 /-- **Theorem 2.7e (`caliper_morse_rejects_washout_step`)**:
 Monotone compaction ramps and single-sided flat steps are strictly rejected. -/
@@ -548,21 +487,17 @@ theorem caliper_morse_rejects_washout_step (v : ℤ → ℝ) (z : ℤ) :
       morseImpulseProd v z ≤ 0 ∧ ¬ isMorseImpulse v z) := by
   refine ⟨fun h_flat => ?_, fun h_mono => ?_⟩
   · have h0 : morseImpulseProd v z = 0 := by
-      unfold morseImpulseProd deltaMinus deltaPlus
-      rcases h_flat with h | h <;> { rw [h]; ring }
+      unfold morseImpulseProd deltaMinus deltaPlus; rcases h_flat with h | h <;> { rw [h]; ring }
     exact ⟨h0, by unfold isMorseImpulse; linarith⟩
   · have h_le : morseImpulseProd v z ≤ 0 := by
-      unfold morseImpulseProd deltaMinus deltaPlus
-      rcases h_mono with ⟨h1, h2⟩ | ⟨h1, h2⟩ <;> nlinarith
+      unfold morseImpulseProd deltaMinus deltaPlus; rcases h_mono with ⟨h1, h2⟩ | ⟨h1, h2⟩ <;> nlinarith
     exact ⟨h_le, by unfold isMorseImpulse; linarith⟩
 
 /-- **Theorem 2.7f (`caliper_morse_shields_thin_stringer`)**:
 Thin-bed spike impulses are recovered at 100% amplitude. -/
 theorem caliper_morse_shields_thin_stringer (v : ℤ → ℝ) (z : ℤ) (v_bg δ_spike : ℝ)
-    (h_left : v (z - 1) = v_bg)
-    (h_right : v (z + 1) = v_bg)
-    (h_center : v z = v_bg + δ_spike)
-    (h_nz : δ_spike ≠ 0) :
+    (h_left : v (z - 1) = v_bg) (h_right : v (z + 1) = v_bg)
+    (h_center : v z = v_bg + δ_spike) (h_nz : δ_spike ≠ 0) :
     morseImpulseProd v z = δ_spike ^ 2 ∧
     isMorseImpulse v z ∧
     laplacian3pt v z = δ_spike := by
@@ -590,9 +525,7 @@ def leviCivitaHalfTensor (i j k : Fin 3) : ℝ :=
 $B_{W_{\mathrm{LC}}}(u, v) = u \times v$. -/
 theorem cross3_eq_triadOperator (u v : Fin 3 → ℝ) (k : Fin 3) :
     triadOperator leviCivitaHalfTensor u v k = cross3 u v k := by
-  fin_cases k <;>
-    simp [triadOperator, leviCivitaHalfTensor, cross3, Fin.sum_univ_three] <;>
-    ring
+  fin_cases k <;> simp [triadOperator, leviCivitaHalfTensor, cross3, Fin.sum_univ_three] <;> ring
 
 def IsIdealMHDBalance (J B grad_p : Fin 3 → ℝ) : Prop :=
   ∀ k : Fin 3, triadOperator leviCivitaHalfTensor J B k = grad_p k
@@ -619,8 +552,8 @@ theorem mhd_euler_force_balance_bijection :
           (mhdToEulerMap (J, B, grad_p)).2.1
           (mhdToEulerMap (J, B, grad_p)).2.2) ∧
     (∀ J B grad_p : Fin 3 → ℝ,
-      IsIdealMHDBalance J B grad_p ↔ (∀ k : Fin 3, cross3 J B k = grad_p k)) := by
-  refine ⟨mhdToEulerMap_involutive.bijective, mhdToEulerMap_involutive,
+      IsIdealMHDBalance J B grad_p ↔ (∀ k : Fin 3, cross3 J B k = grad_p k)) :=
+  ⟨mhdToEulerMap_involutive.bijective, mhdToEulerMap_involutive,
     fun J B grad_p => by simp [IsIdealMHDBalance, IsEulerLambBalance, mhdToEulerMap],
     fun J B grad_p => by simp [IsIdealMHDBalance, cross3_eq_triadOperator]⟩
 
@@ -653,12 +586,9 @@ Non-stellarator-symmetric torsion breaks resonant mode ties while preserving flu
 theorem stellarator_parity_breaks_tie_and_conserves_flux {C : ℕ}
     (ℓ_sym : Fin C → ℝ) (τ₀ : ℝ) (W : Fin C → Fin C → Fin C → ℝ)
     (u v : Fin C → ℝ) (i₀ c₁ c₂ : Fin C) (α β : ℝ)
-    (hτ : 0 < τ₀) (hα : 0 < α) (hβ : 0 < β)
-    (h_tie : ℓ_sym c₁ = ℓ_sym c₂)
-    (hu_i0 : u i₀ = β)
-    (hu_other : ∀ i : Fin C, i ≠ i₀ → u i = 0)
-    (hv_c1 : v c₁ = α)
-    (hv_c2 : v c₂ = α)
+    (hτ : 0 < τ₀) (hα : 0 < α) (hβ : 0 < β) (h_tie : ℓ_sym c₁ = ℓ_sym c₂)
+    (hu_i0 : u i₀ = β) (hu_other : ∀ i : Fin C, i ≠ i₀ → u i = 0)
+    (hv_c1 : v c₁ = α) (hv_c2 : v c₂ = α)
     (hv_other : ∀ c : Fin C, c ≠ c₁ → c ≠ c₂ → v c = 0) :
     (stellaratorReadout C ℓ_sym τ₀ W u v c₁ -
       stellaratorReadout C ℓ_sym τ₀ W u v c₂ =
@@ -691,8 +621,7 @@ theorem stellarator_zero_torsion_homotopy_iff {C : ℕ}
 
 /-! ### Theorem 2.9: Relaxed-Flow MRxMHD Bernoulli Jump & Collinearity -/
 
-noncomputable def flowBeltramiMultiplier (μ M : ℝ) : ℝ :=
-  μ / (1 - M ^ 2)
+noncomputable def flowBeltramiMultiplier (μ M : ℝ) : ℝ := μ / (1 - M ^ 2)
 
 theorem sub_alfvenic_beltrami_homotopy_zero_flow (μ : ℝ) :
     flowBeltramiMultiplier μ 0 = μ := by
@@ -702,8 +631,7 @@ theorem sub_alfvenic_beltrami_pos (μ M : ℝ) (hμ : 0 < μ) (hM : M ^ 2 < 1) :
     0 < flowBeltramiMultiplier μ M :=
   div_pos hμ (by linarith)
 
-def collinearBeltramiField (α : ℝ) (B : Fin 3 → ℝ) (k : Fin 3) : ℝ :=
-  α * B k
+def collinearBeltramiField (α : ℝ) (B : Fin 3 → ℝ) (k : Fin 3) : ℝ := α * B k
 
 /-- **Theorem 2.9a (`beltrami_cross_helicity_collinear_lorentz_vanishes`)**:
 $B_{W_{\mathrm{LC}}}(\alpha \mathbf{B}, \mathbf{B}) = \mathbf{0}$. -/
@@ -713,8 +641,7 @@ theorem beltrami_cross_helicity_collinear_lorentz_vanishes (α : ℝ) (B : Fin 3
   rw [cross3_eq_triadOperator, and_self_iff]
   fin_cases k <;> simp [cross3, collinearBeltramiField] <;> ring
 
-noncomputable def flowBernoulliHead (p B_sq M : ℝ) : ℝ :=
-  p + (1 + M ^ 2) * B_sq / 2
+noncomputable def flowBernoulliHead (p B_sq M : ℝ) : ℝ := p + (1 + M ^ 2) * B_sq / 2
 
 def IsFlowMRxMHDJumpBalanced (p₁ B₁_sq M₁ p₂ B₂_sq M₂ : ℝ) : Prop :=
   flowBernoulliHead p₁ B₁_sq M₁ = flowBernoulliHead p₂ B₂_sq M₂
@@ -730,8 +657,7 @@ theorem mrxmhd_flow_bernoulli_jump_conservation (p₁ B₁_sq M₁ p₂ B₂_sq 
   refine ⟨⟨fun h => by linarith, fun h => by linarith⟩, ⟨fun h => ?_, fun h => ?_⟩⟩ <;>
     { ring_nf at h ⊢; linarith }
 
-noncomputable def kamDiophantineGap (ι : ℝ) (n m : ℕ) : ℝ :=
-  |ι - (n : ℝ) / (m : ℝ)|
+noncomputable def kamDiophantineGap (ι : ℝ) (n m : ℕ) : ℝ := |ι - (n : ℝ) / (m : ℝ)|
 
 def IsKAMInterfaceAdmissible (ι M γ ν : ℝ) (n m : ℕ) : Prop :=
   M ^ 2 < 1 ∧ γ / ((m : ℝ) ^ ν) ≤ kamDiophantineGap ι n m
@@ -759,22 +685,6 @@ noncomputable def cayleyRotor2 (α : ℝ) (i j : Fin 2) : ℝ :=
   | 1, 1 => c
   | _, _ => 0
 
-lemma cayleyRotor2_orthonormal (α : ℝ) :
-    (∀ j k : Fin 2, (∑ i : Fin 2, cayleyRotor2 α i j * cayleyRotor2 α i k) = if j = k then 1 else 0) := by
-  intro j k
-  have hdenom : 1 + α ^ 2 ≠ 0 := by positivity
-  have h_alg : ((1 - α ^ 2) / (1 + α ^ 2)) ^ 2 + ((2 * α) / (1 + α ^ 2)) ^ 2 = 1 := by
-    have h_sq : (1 - α ^ 2) ^ 2 + (2 * α) ^ 2 = (1 + α ^ 2) ^ 2 := by ring
-    rw [div_pow, div_pow, ← add_div, h_sq, div_self (pow_ne_zero 2 hdenom)]
-  rw [Fin.sum_univ_two]
-  fin_cases j <;> fin_cases k <;>
-    simp only [cayleyRotor2, Fin.isValue, Fin.coe_ofNat_eq_mod, Nat.zero_mod,
-               Nat.mod_succ, Fin.mk.injEq, Nat.reduceEqDiff, ↓reduceIte]
-  · linear_combination h_alg
-  · ring
-  · ring
-  · linear_combination h_alg
-
 /-- **Theorem 2.10a (`cayley_rank2_orthogonality`)**:
 For any skew-symmetric generator parameter $\alpha \in \mathbb{R}$, the Cayley transform
 produces an exact orthogonal rotor satisfying $R^\top R = I_2$ and preserving the Euclidean norm:
@@ -782,16 +692,23 @@ $$\|R(\alpha) x\|_2^2 = \|x\|_2^2.$$ -/
 theorem cayley_rank2_orthogonality (α : ℝ) (x : Fin 2 → ℝ) :
     (∀ j k : Fin 2, (∑ i : Fin 2, cayleyRotor2 α i j * cayleyRotor2 α i k) = if j = k then 1 else 0) ∧
     (∑ i : Fin 2, (∑ j : Fin 2, cayleyRotor2 α i j * x j) ^ 2) = (∑ i : Fin 2, x i ^ 2) := by
-  have h_orth := cayleyRotor2_orthonormal α
-  refine ⟨h_orth, ?_⟩
-  rw [Fin.sum_univ_two, Fin.sum_univ_two]
-  simp only [Fin.sum_univ_two, cayleyRotor2, Fin.isValue, Fin.coe_ofNat_eq_mod,
-             Nat.zero_mod, Nat.mod_succ]
   have hdenom : 1 + α ^ 2 ≠ 0 := by positivity
   have h_alg : ((1 - α ^ 2) / (1 + α ^ 2)) ^ 2 + ((2 * α) / (1 + α ^ 2)) ^ 2 = 1 := by
-    have h_sq : (1 - α ^ 2) ^ 2 + (2 * α) ^ 2 = (1 + α ^ 2) ^ 2 := by ring
-    rw [div_pow, div_pow, ← add_div, h_sq, div_self (pow_ne_zero 2 hdenom)]
-  linear_combination (x 0 ^ 2 + x 1 ^ 2) * h_alg
+    rw [div_pow, div_pow, ← add_div, show (1 - α ^ 2) ^ 2 + (2 * α) ^ 2 = (1 + α ^ 2) ^ 2 by ring,
+        div_self (pow_ne_zero 2 hdenom)]
+  refine ⟨fun j k => ?_, ?_⟩
+  · rw [Fin.sum_univ_two]
+    fin_cases j <;> fin_cases k <;>
+      simp only [cayleyRotor2, Fin.isValue, Fin.coe_ofNat_eq_mod, Nat.zero_mod,
+                 Nat.mod_succ, Fin.mk.injEq, Nat.reduceEqDiff, ↓reduceIte] <;>
+      first | linear_combination h_alg | ring
+  · simp only [Fin.sum_univ_two, cayleyRotor2, Fin.isValue, Fin.coe_ofNat_eq_mod,
+               Nat.zero_mod, Nat.mod_succ]
+    linear_combination (x 0 ^ 2 + x 1 ^ 2) * h_alg
+
+lemma cayleyRotor2_orthonormal (α : ℝ) :
+    ∀ j k : Fin 2, (∑ i : Fin 2, cayleyRotor2 α i j * cayleyRotor2 α i k) = if j = k then 1 else 0 :=
+  (cayley_rank2_orthogonality α 0).1
 
 /-- Stealth domain-native alias for Theorem 2.10a. -/
 theorem cayley_rotor_orthogonality (α : ℝ) (x : Fin 2 → ℝ) :
@@ -801,11 +718,8 @@ theorem cayley_rotor_orthogonality (α : ℝ) (x : Fin 2 → ℝ) :
 
 /-! ### Theorem 2.10b: SE(2) Contact Sheaf Unilateral Non-Penetration Invariant -/
 
-def contactNormalCoboundary (nx ny dvx dvy : ℝ) : ℝ :=
-  nx * dvx + ny * dvy
-
-def contactTangentCoboundary (nx ny dvx dvy : ℝ) : ℝ :=
-  -ny * dvx + nx * dvy
+def contactNormalCoboundary (nx ny dvx dvy : ℝ) : ℝ := nx * dvx + ny * dvy
+def contactTangentCoboundary (nx ny dvx dvy : ℝ) : ℝ := -ny * dvx + nx * dvy
 
 /-- **Theorem 2.10b (`contact_sheaf_non_penetration_invariant`)**:
 For any contact edge with unit normal $\mathbf{n} = (n_x, n_y)$ ($n_x^2 + n_y^2 = 1$):
@@ -824,14 +738,11 @@ theorem contact_sheaf_non_penetration_invariant (nx ny dvx dvy : ℝ)
       let dvy' := vn * ny + vt * nx
       contactNormalCoboundary nx ny dvx' dvy' = vn ∧
       contactTangentCoboundary nx ny dvx' dvy' = vt) := by
-  refine ⟨?_, fun h => by linarith, fun vn vt _ => ?_⟩
-  · unfold contactNormalCoboundary contactTangentCoboundary
-    linear_combination -(dvx ^ 2 + dvy ^ 2) * h_unit
-  · unfold contactNormalCoboundary contactTangentCoboundary
-    dsimp only
-    constructor
-    · linear_combination vn * h_unit
-    · linear_combination vt * h_unit
+  refine ⟨by unfold contactNormalCoboundary contactTangentCoboundary;
+             linear_combination -(dvx ^ 2 + dvy ^ 2) * h_unit,
+          fun h => by linarith, fun vn vt _ => ?_⟩
+  unfold contactNormalCoboundary contactTangentCoboundary
+  exact ⟨by linear_combination vn * h_unit, by linear_combination vt * h_unit⟩
 
 /-- Stealth domain-native alias for Theorem 2.10b. -/
 theorem contact_sheaf_unilateral_non_penetration (nx ny dvx dvy : ℝ)
@@ -885,10 +796,8 @@ theorem sram_arena_layout_verified :
     (∀ i : Fin 7, arenaOffsets i % 64 = 0) ∧
     (∀ i j : Fin 7, i.val < j.val → arenaOffsets i + arenaSizes i ≤ arenaOffsets j) ∧
     (arenaOffsets 6 + arenaSizes 6 ≤ arenaTotalBound ∧ arenaTotalBound < sramL3Ceiling) := by
-  refine ⟨?_, ?_, ?_⟩
-  · intro i; fin_cases i <;> rfl
-  · intro i j hij; fin_cases i <;> fin_cases j <;> (try revert hij; decide)
-  · decide
+  refine ⟨fun i => by fin_cases i <;> rfl, fun i j hij => ?_, by decide⟩
+  fin_cases i <;> fin_cases j <;> (try revert hij; decide)
 
 /-- Stealth domain-native alias for Theorem 2.11. -/
 theorem sram_arena_cacheline_disjoint_and_bounded :
