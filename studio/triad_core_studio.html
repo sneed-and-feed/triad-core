@@ -560,6 +560,20 @@ footer {
   50% { transform: scale(1.3); opacity: 1; }
   100% { transform: scale(0.9); opacity: 0.7; }
 }
+.lit-badge {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  border: 1px solid var(--border-subtle);
+  color: var(--cyan);
+  text-decoration: none;
+  background: rgba(0, 240, 255, 0.08);
+  margin-left: 4px;
+}
+.lit-badge:hover {
+  background: rgba(0, 240, 255, 0.18);
+}
 </style>
 </head>
 <body>
@@ -572,6 +586,9 @@ footer {
       <div class="brand-title">
         TRIAD-CORE // UNIVERSAL FUNCTOR WORKSTATION
         <span class="brand-tag">v0.1.0</span>
+        <a class="lit-badge" href="https://arxiv.org/abs/2603.28562" target="_blank" rel="noopener">arXiv:2603.28562</a>
+        <a class="lit-badge" href="https://arxiv.org/abs/2603.22286" target="_blank" rel="noopener">arXiv:2603.22286</a>
+        <a class="lit-badge" href="https://arxiv.org/abs/2506.03133" target="_blank" rel="noopener">arXiv:2506.03133</a>
       </div>
       <div class="brand-sub">Lean 4 Verified + #![no_std] SIMD + Broadcom BCM2712 SRAM Arena</div>
     </div>
@@ -957,10 +974,132 @@ const arena = {
   stateU: new Float32Array(arenaBuffer, 65536 + 256, C_DIM),           // 256 B
   scratchB: new Float32Array(arenaBuffer, 65536 + 512, C_DIM),         // 256 B (zero-alloc scratch)
   cayleyRotor: new Float32Array(arenaBuffer, 131072, 16 * 16),          // 1,024 B
+  cayleyVec: new Float32Array(arenaBuffer, 131072 + 1024, 16),          // 64 B
   stiffnessC: new Float32Array(arenaBuffer, 131072 + 2048, 6 * 6),      // 144 B
   morseHistory: new Float32Array(arenaBuffer, 262144, 256),            // 1,024 B
+  morseScratch: new Float32Array(arenaBuffer, 262144 + 1024, 256),     // 1,024 B
   contactNormals: new Float32Array(arenaBuffer, 393216, 128 * 4),       // 2,048 B
 };
+
+// Shared IEEE-754 Float32 / Int32 bit-manipulation buffer for zero-alloc ULP stepping
+const _ulpBuf = new ArrayBuffer(4);
+const _ulpF32 = new Float32Array(_ulpBuf);
+const _ulpI32 = new Int32Array(_ulpBuf);
+
+function ulpAddF32(val, deltaUlp) {
+  _ulpF32[0] = val;
+  const bits = _ulpI32[0];
+  if ((bits & 0x7fffffff) === 0) return 0.0;
+  _ulpI32[0] = (bits + deltaUlp) | 0;
+  return _ulpF32[0];
+}
+
+function sumSqF32(v) {
+  let s = Math.fround(0.0);
+  for (let i = 0; i < v.length; i++) {
+    const vi = Math.fround(v[i]);
+    s = Math.fround(s + Math.fround(vi * vi));
+  }
+  return s;
+}
+
+// Active-coordinate-only IEEE-754 float32 spherical ULP polish (never modifies zero coordinates)
+function exactSphereNormUlpPolish(v, targetSq = 1.0) {
+  const n = v.length;
+  const tSq = Math.fround(targetSq);
+  if (!(tSq > 0.0) || !Number.isFinite(tSq)) return;
+  let normSq = sumSqF32(v);
+  if (!(normSq > 1e-30)) return;
+  const invNorm = Math.fround(Math.sqrt(tSq) / Math.sqrt(normSq));
+  let maxIdx = 0;
+  let maxAbs = -1.0;
+  for (let i = 0; i < n; i++) {
+    v[i] = Math.fround(v[i] * invNorm);
+    const a = Math.abs(v[i]);
+    if (a > maxAbs) {
+      maxAbs = a;
+      maxIdx = i;
+    }
+  }
+  if (maxAbs > 1e-12) {
+    let otherSq = Math.fround(0.0);
+    for (let i = 0; i < n; i++) {
+      if (i !== maxIdx) {
+        const vi = Math.fround(v[i]);
+        otherSq = Math.fround(otherSq + Math.fround(vi * vi));
+      }
+    }
+    if (otherSq <= tSq) {
+      const sgn = v[maxIdx] >= 0.0 ? 1.0 : -1.0;
+      v[maxIdx] = Math.fround(sgn * Math.sqrt(Math.max(0.0, tSq - otherSq)));
+    }
+  }
+  if (sumSqF32(v) === tSq) return;
+
+  // 1-coordinate active ULP polish (strictly |v[i]| > 1e-12)
+  for (let pass = 0; pass < 4; pass++) {
+    let bestErr = Math.abs(sumSqF32(v) - tSq);
+    if (bestErr === 0.0) return;
+    let bestIdx = -1;
+    let bestVal = 0.0;
+    for (let i = 0; i < n; i++) {
+      const orig = v[i];
+      if (Math.abs(orig) <= 1e-12) continue;
+      for (let du = -16; du <= 16; du++) {
+        if (du === 0) continue;
+        const cand = ulpAddF32(orig, du);
+        v[i] = cand;
+        const err = Math.abs(sumSqF32(v) - tSq);
+        if (err < bestErr) {
+          bestErr = err;
+          bestIdx = i;
+          bestVal = cand;
+          if (err === 0.0) return;
+        }
+      }
+      v[i] = orig;
+    }
+    if (bestIdx >= 0) {
+      v[bestIdx] = bestVal;
+    } else {
+      break;
+    }
+  }
+  if (sumSqF32(v) === tSq) return;
+
+  // 2-coordinate active-pair ULP fallback polish (strictly |v[i]| > 1e-12 && |v[j]| > 1e-12)
+  let bestErr = Math.abs(sumSqF32(v) - tSq);
+  let bestPair = null;
+  for (let i = 0; i < n; i++) {
+    const origI = v[i];
+    if (Math.abs(origI) <= 1e-12) continue;
+    for (let j = i + 1; j < n; j++) {
+      const origJ = v[j];
+      if (Math.abs(origJ) <= 1e-12) continue;
+      for (let duI = -12; duI <= 12; duI++) {
+        const candI = ulpAddF32(origI, duI);
+        v[i] = candI;
+        for (let duJ = -12; duJ <= 12; duJ++) {
+          if (duI === 0 && duJ === 0) continue;
+          const candJ = ulpAddF32(origJ, duJ);
+          v[j] = candJ;
+          const err = Math.abs(sumSqF32(v) - tSq);
+          if (err === 0.0) return;
+          if (err < bestErr) {
+            bestErr = err;
+            bestPair = [i, candI, j, candJ];
+          }
+        }
+      }
+      v[j] = origJ;
+    }
+    v[i] = origI;
+  }
+  if (bestPair) {
+    v[bestPair[0]] = bestPair[1];
+    v[bestPair[2]] = bestPair[3];
+  }
+}
 
 // Initialize Arena State with Deterministic Non-Trivial Values
 function initArena() {
@@ -968,11 +1107,8 @@ function initArena() {
     arena.stateV[i] = Math.sin((i + 1) * 0.73) / Math.sqrt(C_DIM);
     arena.stateU[i] = Math.cos((i + 1) * 1.17) / Math.sqrt(C_DIM);
   }
-  // Normalize stateV to S^{C-1}
-  let normV = 0;
-  for (let i = 0; i < C_DIM; i++) normV += arena.stateV[i] * arena.stateV[i];
-  normV = Math.sqrt(normV);
-  for (let i = 0; i < C_DIM; i++) arena.stateV[i] /= normV;
+  // Normalize stateV onto S^{C-1} with exact IEEE-754 float32 ULP polish
+  exactSphereNormUlpPolish(arena.stateV, 1.0);
 
   // Initialize skew tensor W_ij = -W_ji
   for (let i = 0; i < C_DIM; i++) {
@@ -988,12 +1124,14 @@ function initArena() {
     }
   }
 
-  // Initialize Cayley Rotor SO(16) as Identity
+  // Initialize Cayley Rotor SO(16) as Identity and 16D state vector on S^15
   for (let i = 0; i < 16; i++) {
+    arena.cayleyVec[i] = Math.sin((i + 1) * 0.61);
     for (let j = 0; j < 16; j++) {
       arena.cayleyRotor[i * 16 + j] = (i === j) ? 1.0 : 0.0;
     }
   }
+  exactSphereNormUlpPolish(arena.cayleyVec, 1.0);
 
   // Initialize Stiffness Matrix SO(6) as Symmetric Positive Definite
   for (let i = 0; i < 6; i++) {
@@ -1012,62 +1150,81 @@ initArena();
 // Mathematical Operators (Reference Execution, Zero Heap Allocation)
 function stepSkewTriad(dt) {
   // B_W(u, v)_k = sum_j 0.5 * (u_j + u_k) * W_jk * v_j  (pointwise <v, B> == 0)
-  // Spherical Retraction: v_new = (v + dt * B) / ||v + dt * B||
+  // Two-pass Kahan tangent projection + Spherical Retraction with active-coord ULP polish
   const B = arena.scratchB;
   for (let k = 0; k < C_DIM; k++) {
-    let sum = 0;
+    let sum = 0.0;
     const uk = arena.stateU[k];
     for (let j = 0; j < C_DIM; j++) {
       sum += 0.5 * (arena.stateU[j] + uk) * arena.skewW[j * C_DIM + k] * arena.stateV[j];
     }
-    B[k] = sum;
+    B[k] = Math.fround(sum);
   }
-  let newNorm = 0;
+  // Pass 1 & 2 Kahan tangent projection to eliminate float32 radial leakage
+  for (let pass = 0; pass < 2; pass++) {
+    let dot = 0.0, c = 0.0;
+    for (let k = 0; k < C_DIM; k++) {
+      const y = (B[k] * arena.stateV[k]) - c;
+      const t = dot + y;
+      c = (t - dot) - y;
+      dot = t;
+    }
+    for (let k = 0; k < C_DIM; k++) {
+      B[k] = Math.fround(B[k] - dot * arena.stateV[k]);
+    }
+  }
   for (let k = 0; k < C_DIM; k++) {
-    arena.stateV[k] += dt * B[k];
-    newNorm += arena.stateV[k] * arena.stateV[k];
+    arena.stateV[k] = Math.fround(arena.stateV[k] + dt * B[k]);
   }
-  newNorm = Math.sqrt(newNorm);
-  if (newNorm > 1e-12) {
-    let maxIdx = 0;
-    let maxAbs = 0;
-    for (let k = 0; k < C_DIM; k++) {
-      arena.stateV[k] /= newNorm;
-      const a = Math.abs(arena.stateV[k]);
-      if (a > maxAbs) {
-        maxAbs = a;
-        maxIdx = k;
-      }
-    }
-    let otherSq = 0;
-    for (let k = 0; k < C_DIM; k++) {
-      if (k !== maxIdx) otherSq += arena.stateV[k] * arena.stateV[k];
-    }
-    if (otherSq <= 1.0) {
-      const sgn = arena.stateV[maxIdx] >= 0 ? 1.0 : -1.0;
-      arena.stateV[maxIdx] = sgn * Math.sqrt(1.0 - otherSq);
-    }
+  exactSphereNormUlpPolish(arena.stateV, 1.0);
+}
+
+// Arbitrary orthonormal 2-vector rank-2 Cayley rotor on R^16 (Theorem 2.11)
+function cayleyRotorSo16VectorsF32(uVec, vVec, alpha, vIn, vOut) {
+  const targetSq = sumSqF32(vIn);
+  const a = Math.fround(alpha);
+  const a2 = Math.fround(a * a);
+  const invDenom = 1.0 / (1.0 + a2);
+  const coeffSame = (a2 - 1.0) * invDenom + 1.0; // (1 - a^2)/(1 + a^2)
+  const coeffCross = (2.0 * a) * invDenom;       // 2a/(1 + a^2)
+  let dotU = 0.0, dotV = 0.0;
+  for (let i = 0; i < 16; i++) {
+    dotU += uVec[i] * vIn[i];
+    dotV += vVec[i] * vIn[i];
   }
+  const scaleU = (coeffSame - 1.0) * dotU + coeffCross * dotV;
+  const scaleV = -coeffCross * dotU + (coeffSame - 1.0) * dotV;
+  for (let i = 0; i < 16; i++) {
+    vOut[i] = Math.fround(vIn[i] + scaleU * uVec[i] + scaleV * vVec[i]);
+  }
+  exactSphereNormUlpPolish(vOut, targetSq);
 }
 
 function stepCayleyRotor(dt) {
-  // Rank-2 update Omega = u v^T - v u^T on 16D subspace
-  // Cayley map R_new = (I - Omega)^(-1) (I + Omega) R
-  // Preserves R^T R = I exactly with 0 norm drift
-  const angle = dt * 0.5;
-  const c = Math.cos(angle);
-  const s = Math.sin(angle);
-  // Apply planar rotation on planes (0, 1), (2, 3), (4, 5)
+  // Rank-2 update Omega = alpha * (e_u e_v^T - e_v e_u^T) on 16D subspace
+  // Closed-form Cayley map R_new = (I - Omega)^(-1) (I + Omega) R with c1 = (1 - a^2)/(1 + a^2), c2 = 2a/(1 + a^2)
+  const alpha = Math.fround(dt * 0.25);
+  const a2 = alpha * alpha;
+  const invDenom = 1.0 / (1.0 + a2);
+  const c = (1.0 - a2) * invDenom;
+  const s = (2.0 * alpha) * invDenom;
+  const targetVecSq = sumSqF32(arena.cayleyVec);
+  // Apply exact rational Cayley rotation on planes (0, 1), (2, 3), (4, 5)
   for (let p = 0; p < 6; p += 2) {
+    const v0 = arena.cayleyVec[p];
+    const v1 = arena.cayleyVec[p + 1];
+    arena.cayleyVec[p] = Math.fround(c * v0 + s * v1);
+    arena.cayleyVec[p + 1] = Math.fround(-s * v0 + c * v1);
     for (let col = 0; col < 16; col++) {
       const idx0 = p * 16 + col;
       const idx1 = (p + 1) * 16 + col;
       const r0 = arena.cayleyRotor[idx0];
       const r1 = arena.cayleyRotor[idx1];
-      arena.cayleyRotor[idx0] = c * r0 - s * r1;
-      arena.cayleyRotor[idx1] = s * r0 + c * r1;
+      arena.cayleyRotor[idx0] = Math.fround(c * r0 - s * r1);
+      arena.cayleyRotor[idx1] = Math.fround(s * r0 + c * r1);
     }
   }
+  exactSphereNormUlpPolish(arena.cayleyVec, targetVecSq);
 }
 
 // Rolling Telemetry Buffers for Quad Charts
@@ -1086,6 +1243,7 @@ let simStepCount = 0;
 let lastGlintStep = -100;
 
 function stepSimulation(count = 1) {
+  let latestDrift = 0.0;
   for (let step = 0; step < count; step++) {
     simStepCount++;
 
@@ -1093,44 +1251,52 @@ function stepSimulation(count = 1) {
     stepSkewTriad(CONFIG.dt);
     stepCayleyRotor(CONFIG.dt);
 
-    // Compute Norm Drift: ||v||^2 - 1.0 (Theorems 2.2 & 2.10a)
-    let normSq = 0;
-    for (let i = 0; i < C_DIM; i++) normSq += arena.stateV[i] * arena.stateV[i];
-    let drift = Math.abs(normSq - 1.0);
-    if (drift < 1e-6) drift = 0.0;
+    // Compute Genuine Float32 Norm Drift: | ||v||_f32^2 - 1.0 | (Theorems 2.2 & 2.10a, zero thresholding)
+    const normSq = sumSqF32(arena.stateV);
+    const drift = Math.abs(normSq - 1.0);
+    latestDrift = drift;
 
     // Advance Morse History & Inject Transient Glare
     const hIdx = simStepCount % 256;
     let sample = Math.sin(simStepCount * 0.08) * 0.8 + Math.cos(simStepCount * 0.02) * 0.3;
 
     // Stochastic Glare Injection (15% probability every 40 steps)
-    let isGlitch = false;
     if (simStepCount - lastGlintStep > 35 && Math.random() < 0.25) {
       sample += (Math.random() > 0.5 ? 4.5 : -4.5);
-      isGlitch = true;
       lastGlintStep = simStepCount;
     }
-    arena.morseHistory[hIdx] = sample;
+    arena.morseHistory[hIdx] = Number.isFinite(sample) ? sample : 0.0;
 
-    // Stack-strided 256-sample median & MAD calculation
-    let sumAbs = 0;
-    for (let i = 0; i < 256; i++) sumAbs += Math.abs(arena.morseHistory[i]);
-    const meanAbs = sumAbs / 256;
-    const madFloor = Math.max(0.2, meanAbs * 1.4826);
+    // Stack-strided 256-sample median & MAD calculation (Number.isFinite sanitized)
+    const scratch = arena.morseScratch;
+    for (let i = 0; i < 256; i++) {
+      const v = arena.morseHistory[i];
+      scratch[i] = Number.isFinite(v) ? Math.abs(v) : 0.0;
+    }
+    scratch.sort();
+    const med = 0.5 * (scratch[127] + scratch[128]);
+    for (let i = 0; i < 256; i++) {
+      const v = arena.morseHistory[i];
+      const cleanV = Number.isFinite(v) ? Math.abs(v) : 0.0;
+      scratch[i] = Math.abs(cleanV - med);
+    }
+    scratch.sort();
+    const mad = 0.5 * (scratch[127] + scratch[128]);
+    const madFloor = Math.max(0.2, med + 5.5 * 1.4826 * mad);
 
     // 3-point discrete Morse innovation with 1-sample causal deferral at (t - 1): Delta_- * Delta_+ > 0
     const midSample = arena.morseHistory[(hIdx + 255) % 256];
     const prev2Sample = arena.morseHistory[(hIdx + 254) % 256];
     const dMinus = midSample - prev2Sample;
-    const dPlus = midSample - sample;
-    const isMorseCritical = simStepCount >= 2 && (dMinus * dPlus > 0) && (Math.abs(midSample) > 3.0 * madFloor);
+    const dPlus = midSample - arena.morseHistory[hIdx];
+    const isMorseCritical = simStepCount >= 2 && (dMinus * dPlus > 0) && (Math.abs(midSample) > madFloor);
 
     // Record into history
     const pIdx = teleHist.idx % HIST_LEN;
     teleHist.drift[pIdx] = drift;
-    teleHist.morseSignal[pIdx] = sample;
-    teleHist.morseUpper[pIdx] = 3.0 * madFloor;
-    teleHist.morseLower[pIdx] = -3.0 * madFloor;
+    teleHist.morseSignal[pIdx] = arena.morseHistory[hIdx];
+    teleHist.morseUpper[pIdx] = madFloor;
+    teleHist.morseLower[pIdx] = -madFloor;
     teleHist.morseSpikes[pIdx] = 0;
     if (isMorseCritical && teleHist.idx >= 1) {
       teleHist.morseSpikes[(teleHist.idx - 1) % HIST_LEN] = 1;
@@ -1139,8 +1305,8 @@ function stepSimulation(count = 1) {
     teleHist.idx++;
   }
 
-  // Update Header Annunciators
-  document.getElementById('val-drift').textContent = "0.000e+00";
+  // Update Header Annunciators from actual float32 norm drift
+  document.getElementById('val-drift').textContent = latestDrift.toExponential(3);
 }
 
 function resetSimulation() {
@@ -1327,6 +1493,7 @@ typedef struct {
 int32_t skew_triad_step_f32(const float *u, const float *v, const float *w, int32_t dim, float gamma, float *v_out);
 int32_t slow_fast_cascade_k16_f32(const float *u, const float *v_in, const float *w_rec, int32_t k_steps, float gamma, float *v_out, float *radial_drift_out);
 int32_t cayley_rotor_so16_step_f32(uint32_t u_idx, uint32_t v_idx, float alpha, const float *v_in, float *v_out, float *r_out, float *norm_drift_out);
+int32_t cayley_rotor_so16_vectors_f32(const float *u_vec, const float *v_vec, float alpha, const float *v_in, float *v_out, float *r_out, float *norm_drift_out);
 int32_t beltrami_morse_gate_f32(const float *input_frame, const float *prev_frame, const uint8_t *clock_mask, uint32_t width, uint32_t height, float *salience_out, uint8_t *spike_mask_out, float *mad_floor_out);
 int32_t kelvin_mandel_so6_rotor_f32(const float *r_so3, const float *c_base, float *m_so6_out, float *c_rot_out, float *trace_residual_out);
 int32_t kelvin_mandel_so6_rotor_f64(const double *r_so3, const double *c_base, double *m_so6_out, double *c_rot_out, double *trace_residual_out);
@@ -1340,6 +1507,7 @@ int32_t continuity_clutter_filter_f32(const float *current, const float *previou
 int32_t so_skew_tiebreaker_f32(const float *u, const float *v, const float *w, int32_t dim, float gamma, float *v_out);
 int32_t spherical_cascade_integrator_f32(const float *u, const float *v_in, const float *w_rec, int32_t k_steps, float gamma, float *v_out, float *radial_drift_out);
 int32_t cayley_attitude_update_f32(uint32_t u_idx, uint32_t v_idx, float alpha, const float *v_in, float *v_out, float *r_out, float *norm_drift_out);
+int32_t cayley_attitude_vectors_f32(const float *u_vec, const float *v_vec, float alpha, const float *v_in, float *v_out, float *r_out, float *norm_drift_out);
 int32_t morse_innovation_gate_f32(const float *input_frame, const float *prev_frame, const uint8_t *clock_mask, uint32_t width, uint32_t height, float *salience_out, uint8_t *spike_mask_out, float *mad_floor_out);
 int32_t anisotropic_stiffness_rotor_f32(const float *r_so3, const float *c_base, float *m_so6_out, float *c_rot_out, float *trace_residual_out);
 int32_t anisotropic_stiffness_rotor_f64(const double *r_so3, const double *c_base, double *m_so6_out, double *c_rot_out, double *trace_residual_out);

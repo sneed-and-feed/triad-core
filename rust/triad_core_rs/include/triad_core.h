@@ -215,6 +215,15 @@ int32_t cayley_attitude_update_f32(
     float *norm_drift_out
 );
 
+int32_t cayley_rotor_so16_vectors_f32(
+    const float *u_vec,
+    const float *v_vec,
+    float alpha,
+    const float *v_in,
+    float *v_out,
+    float *norm_drift_out
+);
+
 /* ========================================================================= */
 /* Operator 4: Beltrami Exterior Curl + Discrete Morse Gate + MAD Floor      */
 /* ========================================================================= */

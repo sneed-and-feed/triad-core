@@ -204,8 +204,9 @@ def cayley_rotor_so16_step(
     return v_out, R
 
 
-# Stealth Alias
+# Stealth Alias & Generalized Vector-Pair Alias
 cayley_attitude_update = cayley_rotor_so16_step
+cayley_rotor_so16_vectors = cayley_rotor_so16_step
 
 
 # ==============================================================================

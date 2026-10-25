@@ -223,7 +223,7 @@ def _setup_function_signatures(lib: ctypes.CDLL) -> None:
                 ctypes.POINTER(ctypes.c_float),
             ]
 
-    # 3. cayley_rotor_so16_step_f32 / cayley_attitude_update_f32
+    # 3. cayley_rotor_so16_step_f32 / cayley_attitude_update_f32 / cayley_rotor_so16_vectors_f32
     for name in ["cayley_rotor_so16_step_f32", "cayley_attitude_update_f32"]:
         if hasattr(lib, name):
             fn = getattr(lib, name)
@@ -237,6 +237,17 @@ def _setup_function_signatures(lib: ctypes.CDLL) -> None:
                 ctypes.POINTER(ctypes.c_float),
                 ctypes.POINTER(ctypes.c_float),
             ]
+
+    if hasattr(lib, "cayley_rotor_so16_vectors_f32"):
+        lib.cayley_rotor_so16_vectors_f32.restype = ctypes.c_int32
+        lib.cayley_rotor_so16_vectors_f32.argtypes = [
+            ctypes.POINTER(ctypes.c_float),
+            ctypes.POINTER(ctypes.c_float),
+            ctypes.c_float,
+            ctypes.POINTER(ctypes.c_float),
+            ctypes.POINTER(ctypes.c_float),
+            ctypes.POINTER(ctypes.c_float),
+        ]
 
     # 4. compute_spatial_mad_floor_256_c
     if hasattr(lib, "compute_spatial_mad_floor_256_c"):
@@ -508,6 +519,43 @@ def cayley_attitude_update(
 ) -> Tuple[np.ndarray, np.ndarray, float]:
     """Stealth alias for cayley_rotor_so16_step."""
     return cayley_rotor_so16_step(u_idx, v_idx, alpha, v_in)
+
+
+def cayley_rotor_so16_vectors(
+    u_vec: np.ndarray,
+    v_vec: np.ndarray,
+    alpha: float,
+    v_in: Optional[np.ndarray] = None,
+) -> Tuple[np.ndarray, float]:
+    """Generalized vector-pair Rank-2 so(16) Cayley rotor for orthogonal u, v in R^16."""
+    lib = load_native_library()
+    u_c = np.ascontiguousarray(u_vec, dtype=np.float32).ravel()
+    v_c = np.ascontiguousarray(v_vec, dtype=np.float32).ravel()
+    if len(u_c) < 16 or len(v_c) < 16:
+        raise ValueError(
+            f"cayley_rotor_so16_vectors requires u_vec, v_vec of length >= 16 (got {len(u_c)}, {len(v_c)})"
+        )
+    if v_in is None:
+        vin_c = u_c[:16].copy()
+    else:
+        vin_c = np.ascontiguousarray(v_in, dtype=np.float32).ravel()
+        if len(vin_c) < 16:
+            raise ValueError(
+                f"cayley_rotor_so16_vectors v_in requires length >= 16 (got {len(vin_c)})"
+            )
+    v_out = np.zeros(16, dtype=np.float32)
+    drift = ctypes.c_float(0.0)
+    rc = lib.cayley_rotor_so16_vectors_f32(
+        u_c.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
+        v_c.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
+        ctypes.c_float(alpha),
+        vin_c.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
+        v_out.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
+        ctypes.byref(drift),
+    )
+    if rc != 0:
+        raise RuntimeError(f"cayley_rotor_so16_vectors_f32 failed with code {rc}")
+    return v_out, float(drift.value)
 
 
 def compute_spatial_mad_floor_256(
@@ -832,6 +880,13 @@ def verify_native_parity() -> Dict[str, Any]:
     # 3. Online Rank-2 Cayley Rotor Parity (Theorem 2.10a)
     r_mat, v_cayley, cayley_drift = cayley_rotor_so16_step(3, 11, alpha=0.5, v_in=v_test)
     assert cayley_drift <= 1.0e-7, f"Cayley rotor drift {cayley_drift} exceeds 1.0e-7"
+    e3 = np.zeros(16, dtype=np.float32)
+    e3[3] = 1.0
+    e11 = np.zeros(16, dtype=np.float32)
+    e11[11] = 1.0
+    v_cayley_vec, cayley_vec_drift = cayley_rotor_so16_vectors(e3, e11, alpha=0.5, v_in=v_test)
+    assert cayley_vec_drift <= 1.0e-7, f"Cayley vector-pair rotor drift {cayley_vec_drift} exceeds 1.0e-7"
+    assert float(np.max(np.abs(v_cayley_vec - v_cayley))) <= 1.0e-6
     # Verify R^T R = I_16
     eye16 = np.eye(16, dtype=np.float32)
     ortho_err = float(np.max(np.abs(r_mat.T @ r_mat - eye16)))
