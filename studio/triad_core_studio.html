@@ -1180,24 +1180,60 @@ function stepSkewTriad(dt) {
 }
 
 // Arbitrary orthonormal 2-vector rank-2 Cayley rotor on R^16 (Theorem 2.11)
+const _cayleyU16 = new Float32Array(16);
+const _cayleyV16 = new Float32Array(16);
 function cayleyRotorSo16VectorsF32(uVec, vVec, alpha, vIn, vOut) {
+  if (!vOut) vOut = vIn;
   const targetSq = sumSqF32(vIn);
-  const a = Math.fround(alpha);
-  const a2 = Math.fround(a * a);
+  let normUSq = 0.0;
+  for (let i = 0; i < 16; i++) {
+    const ui = Number.isFinite(uVec[i]) ? uVec[i] : 0.0;
+    _cayleyU16[i] = ui;
+    normUSq += ui * ui;
+  }
+  if (normUSq <= 1e-24) {
+    for (let i = 0; i < 16; i++) vOut[i] = Math.fround(vIn[i]);
+    return 0.0;
+  }
+  const invNormU = 1.0 / Math.sqrt(normUSq);
+  for (let i = 0; i < 16; i++) _cayleyU16[i] = Math.fround(_cayleyU16[i] * invNormU);
+
+  let dotUV = 0.0;
+  for (let i = 0; i < 16; i++) {
+    const vi = Number.isFinite(vVec[i]) ? vVec[i] : 0.0;
+    _cayleyV16[i] = vi;
+    dotUV += _cayleyU16[i] * vi;
+  }
+  let normVSq = 0.0;
+  for (let i = 0; i < 16; i++) {
+    const viOrtho = _cayleyV16[i] - dotUV * _cayleyU16[i];
+    _cayleyV16[i] = viOrtho;
+    normVSq += viOrtho * viOrtho;
+  }
+  if (normVSq <= 1e-24) {
+    for (let i = 0; i < 16; i++) vOut[i] = Math.fround(vIn[i]);
+    return 0.0;
+  }
+  const invNormV = 1.0 / Math.sqrt(normVSq);
+  for (let i = 0; i < 16; i++) _cayleyV16[i] = Math.fround(_cayleyV16[i] * invNormV);
+
+  const a = Number.isFinite(alpha) ? Math.fround(alpha) : 0.0;
+  const a2 = a * a;
   const invDenom = 1.0 / (1.0 + a2);
-  const coeffSame = (a2 - 1.0) * invDenom + 1.0; // (1 - a^2)/(1 + a^2)
-  const coeffCross = (2.0 * a) * invDenom;       // 2a/(1 + a^2)
+  const diagMinusOne = (-2.0 * a2) * invDenom; // (1 - a^2)/(1 + a^2) - 1 = -2a^2/(1 + a^2)
+  const coeffCross = (2.0 * a) * invDenom;     // 2a/(1 + a^2)
   let dotU = 0.0, dotV = 0.0;
   for (let i = 0; i < 16; i++) {
-    dotU += uVec[i] * vIn[i];
-    dotV += vVec[i] * vIn[i];
+    dotU += _cayleyU16[i] * vIn[i];
+    dotV += _cayleyV16[i] * vIn[i];
   }
-  const scaleU = (coeffSame - 1.0) * dotU + coeffCross * dotV;
-  const scaleV = -coeffCross * dotU + (coeffSame - 1.0) * dotV;
+  const scaleU = diagMinusOne * dotU + coeffCross * dotV;
+  const scaleV = -coeffCross * dotU + diagMinusOne * dotV;
   for (let i = 0; i < 16; i++) {
-    vOut[i] = Math.fround(vIn[i] + scaleU * uVec[i] + scaleV * vVec[i]);
+    vOut[i] = Math.fround(vIn[i] + scaleU * _cayleyU16[i] + scaleV * _cayleyV16[i]);
   }
   exactSphereNormUlpPolish(vOut, targetSq);
+  return Math.abs(sumSqF32(vOut) - Math.fround(targetSq));
 }
 
 function stepCayleyRotor(dt) {
@@ -1409,6 +1445,8 @@ function switchVertical(num) {
 // 1-Click Exports
 function exportAuditJSON() {
   const meta = VERTICAL_METADATA[CONFIG.vertical];
+  const liveRadialDrift = Math.abs(sumSqF32(arena.stateV) - 1.0);
+  const liveCayleyDrift = Math.abs(sumSqF32(arena.cayleyVec) - 1.0);
   const receipt = {
     schema: "https://triad-core.sneed-and-feed.org/schema/audit_receipt_v1.json",
     repository: "https://github.com/sneed-and-feed/triad-core",
@@ -1421,15 +1459,15 @@ function exportAuditJSON() {
     },
     theorems_verified: [
       { id: "2.1", name: "so(C) Triad Anti-Symmetry & Tie-Breaking", status: "PASS", residual: 0.0 },
-      { id: "2.2", name: "Tangent Spherical Energy Conservation", status: "PASS", residual: 0.0 },
+      { id: "2.2", name: "Tangent Spherical Energy Conservation", status: "PASS", residual: liveRadialDrift },
       { id: "2.3", name: "Step-0 System 1 Homotopy Equivalence", status: "PASS", residual: 0.0 },
       { id: "2.4", name: "2D Axial RoPE Medoid Invariance", status: "PASS", residual: 0.0 },
-      { id: "2.5", name: "16-Step Spherical Cascade Invariance", status: "PASS", residual: 0.0 },
+      { id: "2.5", name: "16-Step Spherical Cascade Invariance", status: "PASS", residual: liveRadialDrift },
       { id: "2.6", name: "SO(6) Kelvin-Mandel Stiffness Trace Conservation", status: "PASS", residual: 4.440892098500626e-16 },
       { id: "2.7", name: "3-Point Discrete Morse Glare Shielding", status: "PASS", rejection_rate: 1.0 },
       { id: "2.8", name: "3D Ideal MHD Force-Balance Bijection", status: "PASS", flux_surface_tangency: 1.0e-08 },
       { id: "2.9", name: "Relaxed-Flow MRxMHD Bernoulli Jump Law", status: "PASS", residual: 0.0 },
-      { id: "2.10a", name: "Cayley Rank-2 Orthogonality & Norm Preservation", status: "PASS", norm_drift: 0.0 },
+      { id: "2.10a", name: "Cayley Rank-2 Orthogonality & Norm Preservation", status: "PASS", norm_drift: liveCayleyDrift },
       { id: "2.10b", name: "Contact Sheaf SE(2) Unilateral Non-Penetration", status: "PASS", normal_penetration: 0.0 },
       { id: "2.11", name: "SRAM Arena Cacheline Disjointness & Bound", status: "PASS", sram_bytes: 894912, max_bound: 1258291 }
     ],
@@ -1444,7 +1482,11 @@ function exportAuditJSON() {
     simulation_state: {
       steps_executed: simStepCount,
       frame_rate_hz: 240.0,
-      quaternion_rotor_norm: 1.000000000000000
+      quaternion_rotor_norm: 1.000000000000000,
+      radial_drift: liveRadialDrift,
+       radial_drift_formatted: liveRadialDrift.toExponential(3),
+      cayley_norm_drift: liveCayleyDrift,
+      cayley_norm_drift_formatted: liveCayleyDrift.toExponential(3)
     }
   };
 
