@@ -171,11 +171,12 @@ class TestGeometryAndRotorTheorems:
         phase_y = dy * theta_base
         phase_x = dx * theta_base
 
-        # Patch averaging across 2 distinct grid phases (0.0 and phase_y)
+        # Patch averaging across 2 distinct grid phases (0.0 and phase_y / phase_x)
         k_norm = 1.0
         k_patch_avg = 0.5 * (1.0 + math.cos(phase_y))
+        k_patch_avg_x = 0.5 * (1.0 + math.cos(phase_x))
         # Strictly attenuated
-        assert k_patch_avg < k_norm, "Arithmetic patch averaging must strictly attenuate key norm"
+        assert k_patch_avg < k_norm and k_patch_avg_x < k_norm, "Arithmetic patch averaging must strictly attenuate key norm"
 
     def test_theorem_2_6_multistep_spherical_cascade_invariance(self):
         """
@@ -293,6 +294,7 @@ class TestAdvancedConstellationTheorems:
                 alpha = 0.35
                 v_out, drift = cayley_rank2_so16_step(u_idx, v_idx, alpha, v_in)
                 assert drift == 0.0, f"Norm drift {drift} must be 0.000e+00"
+                assert abs(float(np.linalg.norm(v_out)) - 1.0) < 1e-12
 
     def test_theorem_2_10b_se2_contact_sheaf_unilateral_non_penetration(self):
         """
@@ -559,22 +561,30 @@ class TestEdgeCasesAndStealthIntegration:
         from triad_core.operators import beltrami_morse_gate as py_beltrami
 
         # 1. Zero coordinate at index 1 between non-zero indices 0 and 2 must remain 0.0
+        # across both unit and non-unit 2-sparse vectors
         v_in = np.zeros(16, dtype=np.float32)
-        v_in[0] = 0.6
-        v_in[2] = 0.8
-        _, v_out, drift = nat_cayley(0, 2, 0.25, v_in=v_in)
-        assert drift == 0.0
-        assert v_out[1] == 0.0, f"Zero coordinate at index 1 corrupted to {v_out[1]}"
-        assert np.all(v_out[3:] == 0.0)
+        v_in[0] = 0.37
+        v_in[2] = 0.81
+        target_sq = float(np.dot(v_in, v_in))
+        for alpha in np.linspace(0.01, 2.5, 200):
+            _, v_out, drift = nat_cayley(0, 2, float(alpha), v_in=v_in)
+            assert drift == 0.0
+            assert float(np.dot(v_out, v_out)) == target_sq
+            assert v_out[1] == 0.0, f"Zero coordinate at index 1 corrupted to {v_out[1]}"
+            assert np.all(v_out[3:] == 0.0)
 
-        # 2. 2D Beltrami Python-vs-Native parity on non-4-multiple (65x65) and NaN/Inf resilience
+        # 2. 2D Beltrami Python-vs-Native parity on non-4-multiple (65x65) and NaN/Inf/MAX resilience
         idx = np.arange(65 * 65, dtype=np.float32)
         frame_65 = (((idx * 29 + 7) % 97) * 0.01).reshape(65, 65).astype(np.float32)
         frame_65[10, 10] = 0.92  # Washout candidate
         frame_65[10, 9] = 0.92
         frame_65[10, 11] = 0.92
+        frame_65[20, 20] = np.nan
+        frame_65[30, 30] = np.inf
+        frame_65[40, 40] = np.float32(3.4e38)
         nat_sal, nat_spikes, nat_mad = nat_beltrami(frame_65)
         py_res = py_beltrami(frame_65)
+        assert np.all(np.isfinite(nat_sal))
         assert np.max(np.abs(nat_sal - py_res["salience"])) <= 1e-7
         assert abs(nat_mad - py_res["mad_floor"]) <= 1e-7
         assert np.array_equal(nat_spikes, py_res["spike_mask"])

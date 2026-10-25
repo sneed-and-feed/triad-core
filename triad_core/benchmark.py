@@ -389,8 +389,6 @@ def run_workload_04_anisotropic_so6_ebe(num_elements: int = 1000) -> Dict[str, A
     - <= 1.14e-13 SO(6) trace residual (float64) / <= 1.0e-7 (float32).
     - 100% checkerboard suppression.
     """
-    rng = np.random.default_rng(RNG_SEED + 4)
-
     # Reference 6x6 symmetric positive-definite orthotropic stiffness tensor
     C_base = np.array([
         [16.0,  4.0,  3.0,  0.0,  0.0,  0.0],

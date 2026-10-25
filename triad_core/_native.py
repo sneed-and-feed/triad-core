@@ -943,10 +943,20 @@ def verify_native_parity() -> Dict[str, Any]:
     assert cross_res <= 1.0e-6, f"Oracle cross parity {cross_res} exceeds 1.0e-6"
     results["operator_residuals"]["oracle_cross_parity"] = cross_res
 
+    py_casc = engine.slow_fast_cascade_k16(u_test, v_test, None, gamma=0.05, k_steps=16)
+    casc_cross_err = float(np.max(np.abs(v_casc - py_casc)))
+    assert casc_cross_err <= 1.0e-7, f"Oracle cascade cross parity {casc_cross_err} exceeds 1.0e-7"
+    results["operator_residuals"]["oracle_cascade_parity"] = casc_cross_err
+
     py_v_cayley, _ = engine.cayley_attitude_update(3, 11, 0.5, v_test)
     cayley_cross_err = float(np.max(np.abs(v_cayley - py_v_cayley)))
     assert cayley_cross_err <= 1.0e-6, f"Oracle Cayley cross parity {cayley_cross_err} exceeds 1.0e-6"
     results["operator_residuals"]["oracle_cayley_parity"] = cayley_cross_err
+
+    py_m6, py_c_rot = engine.kelvin_mandel_so6_rotor(r3, c_base)
+    so6_cross_err = float(max(np.max(np.abs(m6 - py_m6)), np.max(np.abs(c_rot - py_c_rot))))
+    assert so6_cross_err <= 1.14e-13, f"Oracle SO(6) cross parity {so6_cross_err} exceeds 1.14e-13"
+    results["operator_residuals"]["oracle_so6_f64_parity"] = so6_cross_err
 
     py_mad = engine.compute_spatial_mad_floor_256(test_salience, clock_m)
     mad_cross_err = float(abs(native_mad - py_mad))

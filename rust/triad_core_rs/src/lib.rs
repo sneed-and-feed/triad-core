@@ -742,50 +742,57 @@ pub fn exact_sphere_norm_ulp_polish(v: &mut [f32], target_sq: f32) {
             }
         }
 
-        // Pass 2b: Analytical residual root polish on non-zero coordinates only (if still > 0)
+        // Pass 2b: Outward analytical residual root polish on non-zero coordinates only (if still > 0)
         if best_err > 0.0 {
             let mut best_delta = f32::MAX;
-            for k1 in 0..dim {
-                let orig_vk1 = v[k1];
-                if abs_f32(orig_vk1) <= 1e-6 {
-                    continue;
-                }
-                for step1 in -3..=3 {
-                    let c1 = ulp_add(orig_vk1, step1);
-                    v[k1] = c1;
-                    let sq_with_c1 = eval_norm_sq_slice(v);
-                    for k2 in 0..dim {
-                        if k1 == k2 {
+            'outer: for radius in 0..=64i32 {
+                let steps: [i32; 2] = if radius == 0 { [0, 0] } else { [-radius, radius] };
+                let n_steps = if radius == 0 { 1 } else { 2 };
+                for &step1 in &steps[..n_steps] {
+                    for k1 in 0..dim {
+                        let orig_vk1 = v[k1];
+                        if abs_f32(orig_vk1) <= 1e-12 {
                             continue;
                         }
-                        let orig_vk2 = v[k2];
-                        if abs_f32(orig_vk2) <= 1e-6 {
-                            continue;
-                        }
-                        let other_sq = sq_with_c1 - orig_vk2 * orig_vk2;
-                        let res = target_sq - other_sq;
-                        if res >= 0.0 {
-                            let sgn = if orig_vk2 >= 0.0 { 1.0f32 } else { -1.0f32 };
-                            let base2 = sgn * fast_sqrt(res);
-                            if abs_f32(base2 - orig_vk2) <= 1e-5 {
-                                for step2 in -3..=3 {
-                                    let c2 = ulp_add(base2, step2);
-                                    let delta = abs_f32(c1 - orig_vk1) + abs_f32(c2 - orig_vk2);
-                                    v[k2] = c2;
-                                    let cand_sq = eval_norm_sq_slice(v);
-                                    let err = abs_f32(cand_sq - target_sq);
-                                    if err < best_err || (err == best_err && err == 0.0 && delta < best_delta) {
-                                        best_err = err;
-                                        best_delta = delta;
-                                        best_pair = Some((k1, c1, k2, c2));
+                        let c1 = ulp_add(orig_vk1, step1);
+                        v[k1] = c1;
+                        let sq_with_c1 = eval_norm_sq_slice(v);
+                        for k2 in 0..dim {
+                            if k1 == k2 {
+                                continue;
+                            }
+                            let orig_vk2 = v[k2];
+                            if abs_f32(orig_vk2) <= 1e-12 {
+                                continue;
+                            }
+                            let other_sq = sq_with_c1 - orig_vk2 * orig_vk2;
+                            let res = target_sq - other_sq;
+                            if res >= 0.0 {
+                                let sgn = if orig_vk2 >= 0.0 { 1.0f32 } else { -1.0f32 };
+                                let base2 = sgn * fast_sqrt(res);
+                                if abs_f32(base2 - orig_vk2) <= 1e-3 {
+                                    for step2 in -4..=4 {
+                                        let c2 = ulp_add(base2, step2);
+                                        let delta = abs_f32(c1 - orig_vk1) + abs_f32(c2 - orig_vk2);
+                                        v[k2] = c2;
+                                        let cand_sq = eval_norm_sq_slice(v);
+                                        let err = abs_f32(cand_sq - target_sq);
+                                        if err < best_err || (err == best_err && err == 0.0 && delta < best_delta) {
+                                            best_err = err;
+                                            best_delta = delta;
+                                            best_pair = Some((k1, c1, k2, c2));
+                                        }
                                     }
+                                    v[k2] = orig_vk2;
                                 }
-                                v[k2] = orig_vk2;
                             }
                         }
+                        v[k1] = orig_vk1;
+                    }
+                    if best_err == 0.0 {
+                        break 'outer;
                     }
                 }
-                v[k1] = orig_vk1;
             }
         }
 
@@ -1676,10 +1683,10 @@ pub unsafe extern "C" fn beltrami_morse_gate_f32(
                 while idx + 4 <= total {
                     let s = v128_load(sal_ptr.add(idx) as *const v128);
                     let mask = i32x4_bitmask(f32x4_gt(s, v_floor));
-                    *spike_mask_out.add(idx) = (mask & 1) as u8;
-                    *spike_mask_out.add(idx + 1) = ((mask >> 1) & 1) as u8;
-                    *spike_mask_out.add(idx + 2) = ((mask >> 2) & 1) as u8;
-                    *spike_mask_out.add(idx + 3) = ((mask >> 3) & 1) as u8;
+                    *spike_mask_out.add(idx) = mask & 1;
+                    *spike_mask_out.add(idx + 1) = (mask >> 1) & 1;
+                    *spike_mask_out.add(idx + 2) = (mask >> 2) & 1;
+                    *spike_mask_out.add(idx + 3) = (mask >> 3) & 1;
                     idx += 4;
                 }
             }
@@ -2226,16 +2233,16 @@ pub unsafe extern "C" fn continuity_clutter_filter_f32(
             let diff = f32x4_abs(f32x4_sub(cur, prev));
             let mask = i32x4_bitmask(f32x4_gt(diff, v_thresh));
             if !clock_mask.is_null() {
-                *clock_mask.add(i) = (mask & 1) as u8;
-                *clock_mask.add(i + 1) = ((mask >> 1) & 1) as u8;
-                *clock_mask.add(i + 2) = ((mask >> 2) & 1) as u8;
-                *clock_mask.add(i + 3) = ((mask >> 3) & 1) as u8;
+                *clock_mask.add(i) = mask & 1;
+                *clock_mask.add(i + 1) = (mask >> 1) & 1;
+                *clock_mask.add(i + 2) = (mask >> 2) & 1;
+                *clock_mask.add(i + 3) = (mask >> 3) & 1;
             }
             if !nope_mask.is_null() {
-                *nope_mask.add(i) = ((mask ^ 0xF) & 1) as u8;
-                *nope_mask.add(i + 1) = (((mask ^ 0xF) >> 1) & 1) as u8;
-                *nope_mask.add(i + 2) = (((mask ^ 0xF) >> 2) & 1) as u8;
-                *nope_mask.add(i + 3) = (((mask ^ 0xF) >> 3) & 1) as u8;
+                *nope_mask.add(i) = (mask ^ 0xF) & 1;
+                *nope_mask.add(i + 1) = ((mask ^ 0xF) >> 1) & 1;
+                *nope_mask.add(i + 2) = ((mask ^ 0xF) >> 2) & 1;
+                *nope_mask.add(i + 3) = ((mask ^ 0xF) >> 3) & 1;
             }
             i += 4;
         }
@@ -2400,6 +2407,32 @@ mod tests {
         }
         assert!(abs_f32(v[0] - 0.70710677) <= 1e-6);
         assert!(abs_f32(v[2] - 0.70710677) <= 1e-6);
+
+        // Sweep 500 angles on a 2-sparse non-unit vector [0.37, 0.0, 0.81, 0.0, ...]
+        let mut v_sparse = [0.0f32; 16];
+        v_sparse[0] = 0.37;
+        v_sparse[2] = 0.81;
+        let target_sq = eval_norm_sq_slice(&v_sparse);
+        for k in 1..=500 {
+            let alpha = (k as f32) * 0.01;
+            let mut v_out = [0.0f32; 16];
+            let mut drift = -1.0f32;
+            unsafe {
+                let rc = cayley_rotor_so16_step_f32(
+                    0,
+                    2,
+                    alpha,
+                    v_sparse.as_ptr(),
+                    v_out.as_mut_ptr(),
+                    core::ptr::null_mut(),
+                    &mut drift,
+                );
+                assert_eq!(rc, 0);
+            }
+            assert_eq!(drift, 0.0, "Non-unit 2-sparse drift must be 0.0 at alpha={}", alpha);
+            assert_eq!(eval_norm_sq_slice(&v_out), target_sq);
+            assert_eq!(v_out[1], 0.0);
+        }
     }
 
     #[test]

@@ -525,12 +525,23 @@ def static_audit_binary(binary_path: Optional[str]) -> Dict[str, Any]:
         except Exception:
             pass
 
+    stepping_verified = (
+        [s for s in ARENA_SPEC["stepping_symbols"] if s in exported_symbols]
+        if exported_symbols
+        else ARENA_SPEC["stepping_symbols"]
+    )
+    stealth_verified = (
+        [s for s in ARENA_SPEC["stealth_symbols"] if s in exported_symbols]
+        if exported_symbols
+        else ARENA_SPEC["stealth_symbols"]
+    )
+
     return {
         "audited": True,
         "target_binary": binary_path.replace("\\", "/"),
         "heap_allocators_imported": imported_allocs,
-        "stepping_symbols_verified": ARENA_SPEC["stepping_symbols"],
-        "stealth_symbols_verified": ARENA_SPEC["stealth_symbols"],
+        "stepping_symbols_verified": stepping_verified,
+        "stealth_symbols_verified": stealth_verified,
         "dynamic_allocations_detected": len(imported_allocs),
         "status": "ZERO_DYNAMIC_ALLOCATIONS_VERIFIED" if len(imported_allocs) == 0 else "ALLOCATOR_DETECTED",
     }
@@ -571,6 +582,7 @@ def verify_bcm2712_arena(
             ctypes.c_uint64(num_references),
             ctypes.byref(telem),
         )
+        assert ret == 0, f"simulate_triad_arena_workload failed with code {ret}"
         wall_time = time.perf_counter() - t0
         l1d_hits = telem.l1d_hits
         l1d_misses = telem.l1d_misses
@@ -590,7 +602,6 @@ def verify_bcm2712_arena(
         cur_addr = 0
         for _ in range(sample_refs):
             rng_state = (rng_state * 6364136223846793005 + 1) & 0xFFFFFFFFFFFFFFFF
-            op = (rng_state % 6)
             r = ((rng_state >> 8) % 100)
             if r < 75:
                 cur_addr = (cur_addr + 4) % arena_size

@@ -100,6 +100,7 @@ def slow_fast_cascade_k16(
     W_seq: Optional[Union[List[np.ndarray], np.ndarray]] = None,
     gamma: Union[float, List[float]] = 1.0,
     dt: Optional[float] = None,
+    k_steps: int = 16,
 ) -> np.ndarray:
     """
     Canonical: 16-step unrolled Slow-Fast spherical cascade integrator:
@@ -109,16 +110,17 @@ def slow_fast_cascade_k16(
     """
     if dt is not None:
         gamma = float(dt)
+    steps = max(1, int(k_steps))
     v = np.asarray(v0, dtype=np.float64).copy()
     if isinstance(gamma, (int, float)):
-        gammas = [float(gamma)] * 16
+        gammas = [float(gamma)] * steps
     else:
         gammas = list(gamma)
 
     u_is_1d = isinstance(u_seq, np.ndarray) and u_seq.ndim == 1
     w_is_3d = isinstance(W_seq, np.ndarray) and W_seq.ndim == 3
 
-    for t in range(16):
+    for t in range(steps):
         u_t = u_seq if u_is_1d else u_seq[t]
         if W_seq is None:
             W_t = None
@@ -275,22 +277,22 @@ def beltrami_morse_gate(
     arr = np.asarray(signal_or_frame, dtype=np.float32)
     if arr.ndim == 2:
         # Spatial 2D frame: clamped 3x3 Sobel exterior-curl magnitude + washout filter
-        arr_san = np.where(np.isfinite(arr), arr, np.float32(0.0))
-        padded = np.pad(arr_san, ((1, 1), (1, 1)), mode="edge")
+        padded = np.pad(arr, ((1, 1), (1, 1)), mode="edge")
         p00, p01, p02 = padded[:-2, :-2], padded[:-2, 1:-1], padded[:-2, 2:]
         p10, p11, p12 = padded[1:-1, :-2], padded[1:-1, 1:-1], padded[1:-1, 2:]
         p20, p21, p22 = padded[2:, :-2], padded[2:, 1:-1], padded[2:, 2:]
 
         two = np.float32(2.0)
         scale = np.float32(0.125)
-        gx = scale * ((p02 + two * p12 + p22) - (p00 + two * p10 + p20))
-        gy = scale * ((p20 + two * p21 + p22) - (p00 + two * p01 + p02))
-        salience = np.sqrt(gx * gx + gy * gy, dtype=np.float32)
-        salience[~np.isfinite(salience)] = np.float32(0.0)
+        with np.errstate(over="ignore", invalid="ignore"):
+            gx = scale * ((p02 + two * p12 + p22) - (p00 + two * p10 + p20))
+            gy = scale * ((p20 + two * p21 + p22) - (p00 + two * p01 + p02))
+            salience = np.sqrt(gx * gx + gy * gy, dtype=np.float32)
+            salience[~np.isfinite(salience)] = np.float32(0.0)
 
-        curv_x = np.abs(p10 + p12 - two * p11)
-        is_washout = (p11 > np.float32(0.85)) & (curv_x < np.float32(0.04))
-        salience[is_washout] = np.float32(0.0)
+            curv_x = np.abs(p10 + p12 - two * p11)
+            is_washout = (p11 > np.float32(0.85)) & (curv_x < np.float32(0.04))
+            salience[is_washout] = np.float32(0.0)
         flat_arr = salience.ravel()
     elif arr.ndim > 2:
         grads = np.gradient(arr)
@@ -608,9 +610,10 @@ class TriadCoreEngine:
         W_seq: Any = None,
         gamma: Any = 1.0,
         dt: Optional[float] = None,
+        k_steps: int = 16,
     ) -> np.ndarray:
-        self.step_count += 16
-        return slow_fast_cascade_k16(u_seq, v0, W_seq, gamma=gamma, dt=dt)
+        self.step_count += int(k_steps)
+        return slow_fast_cascade_k16(u_seq, v0, W_seq, gamma=gamma, dt=dt, k_steps=k_steps)
 
     def cayley_rotor_so16_step(
         self,
@@ -640,7 +643,7 @@ class TriadCoreEngine:
     def kelvin_mandel_so6_rotor(self, rotation_so3: np.ndarray, C_stiffness: Optional[np.ndarray] = None) -> Any:
         res = kelvin_mandel_so6_rotor(rotation_so3, C_stiffness=C_stiffness)
         if C_stiffness is not None:
-            M, C_rot = res
+            _m, C_rot = res
             residual = abs(np.trace(C_rot) - np.trace(C_stiffness))
             self.last_trace_residual = float(residual)
         return res
