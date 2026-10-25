@@ -26,6 +26,11 @@ from __future__ import annotations
 import json
 import math
 from pathlib import Path
+import sys
+
+_REPO_ROOT = str(Path(__file__).resolve().parent.parent)
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
 
 import numpy as np
 import pytest
@@ -602,7 +607,7 @@ class TestEdgeCasesAndStealthIntegration:
             nat_clutter(np.ones(16, dtype=np.float32), np.ones(15, dtype=np.float32))
 
     def test_bcm2712_elf64_symbol_audit_and_fallback_verifier(self, tmp_path, monkeypatch):
-        """Verifies ELF64 symbol-table allocator auditing, substring immunity, and Python fallback."""
+        """Verifies ELF64/ELF32/PE symbol-table allocator auditing, substring immunity, and Python fallback."""
         import struct
         import sys
         sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
@@ -625,7 +630,6 @@ class TestEdgeCasesAndStealthIntegration:
 
         # 2. Construct minimal valid ELF64 binary with .dynsym + .dynstr
         dynstr = b"\x00skew_triad_step_f32\x00so_skew_tiebreaker_f32\x00memcpy@GLIBC_2.14\x00"
-        # 4 symbols: null, skew_triad_step_f32 (defined, shndx=1), so_skew_tiebreaker_f32 (defined, shndx=1), memcpy (undef, shndx=0)
         dynsym = (
             struct.pack("<IBBHQQ", 0, 0, 0, 0, 0, 0)
             + struct.pack("<IBBHQQ", 1, 0x12, 0, 1, 0x1000, 32)
@@ -650,12 +654,86 @@ class TestEdgeCasesAndStealthIntegration:
         assert "skew_triad_step_f32" in res_elf["stepping_symbols_verified"]
         assert "so_skew_tiebreaker_f32" in res_elf["stealth_symbols_verified"]
 
-        # 3. Verify Python fallback simulator conserves hits/misses and passes < 0.05% LLd miss rate
+        # 3. Stripped ELF64 (section headers present, no SHT_SYMTAB/SHT_DYNSYM) must fall back and catch malloc
+        dynstr_dirty = b"\x00malloc@GLIBC_2.2.5\x00"
+        shdr_stripped_off = ehdr_size + len(dynstr_dirty)
+        sh_dynstr_dirty = struct.pack("<IIQQQQIIQQ", 1, 3, 0, 0, ehdr_size, len(dynstr_dirty), 0, 0, 1, 0)
+        ehdr_stripped = (
+            b"\x7fELF\x02\x01\x01" + b"\x00" * 9
+            + struct.pack("<HHIQQQIHHHHHH", 3, 62, 1, 0, 0, shdr_stripped_off, 0, 64, 0, 0, 64, 2, 0)
+        )
+        elf_stripped_path = tmp_path / "libtriad_stripped_dirty.so"
+        elf_stripped_path.write_bytes(ehdr_stripped + dynstr_dirty + sh_null + sh_dynstr_dirty)
+        res_stripped = v.static_audit_binary(str(elf_stripped_path))
+        assert res_stripped["dynamic_allocations_detected"] == 1
+        assert res_stripped["heap_allocators_imported"] == ["malloc"]
+
+        # 4. ELF32 (ELFCLASS32) symbol table parsing
+        dynsym32 = (
+            struct.pack("<IIIBBH", 0, 0, 0, 0, 0, 0)
+            + struct.pack("<IIIBBH", 1, 0x1000, 32, 0x12, 0, 1)
+            + struct.pack("<IIIBBH", 21, 0x1020, 32, 0x12, 0, 1)
+        )
+        ehdr32_size = 52
+        dynstr32_off = ehdr32_size
+        dynsym32_off = dynstr32_off + len(dynstr)
+        shdr32_off = dynsym32_off + len(dynsym32)
+        sh32_null = struct.pack("<IIIIIIIIII", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+        sh32_dynstr = struct.pack("<IIIIIIIIII", 1, 3, 0, 0, dynstr32_off, len(dynstr), 0, 0, 1, 0)
+        sh32_dynsym = struct.pack("<IIIIIIIIII", 2, 11, 0, 0, dynsym32_off, len(dynsym32), 1, 0, 4, 16)
+        ehdr32 = (
+            b"\x7fELF\x01\x01\x01" + b"\x00" * 9
+            + struct.pack("<HHIIIIIHHHHHH", 3, 40, 1, 0, 0, shdr32_off, 0, 52, 0, 0, 40, 3, 0)
+        )
+        elf32_path = tmp_path / "libtriad_armv7.so"
+        elf32_path.write_bytes(ehdr32 + dynstr + dynsym32 + sh32_null + sh32_dynstr + sh32_dynsym)
+        res_elf32 = v.static_audit_binary(str(elf32_path))
+        assert res_elf32["dynamic_allocations_detected"] == 0
+        assert "skew_triad_step_f32" in res_elf32["stepping_symbols_verified"]
+
+        # 5. Pure-Python PE32+ parser detects non-zero 2-byte Hint (0x0125) import when pefile is disabled
+        monkeypatch.setattr(v, "PEFILE_AVAILABLE", False)
+        pe_buf = bytearray(1024)
+        pe_buf[0:2] = b"MZ"
+        struct.pack_into("<I", pe_buf, 0x3C, 0x80)
+        pe_buf[0x80:0x84] = b"PE\x00\x00"
+        struct.pack_into("<HHIIIHH", pe_buf, 0x84, 0x8664, 1, 0, 0, 0, 240, 0x2022)
+        opt_off = 0x98
+        struct.pack_into("<H", pe_buf, opt_off, 0x20B)  # PE32+
+        struct.pack_into("<II", pe_buf, opt_off + 112 + 8, 0x200, 40)  # Import RVA = 0x200
+        sec_off = opt_off + 240
+        struct.pack_into("<IIII", pe_buf, sec_off + 8, 0x200, 0x200, 0x200, 0x200)
+        # Import descriptor at 0x200: OriginalFirstThunk=0x230, Name=0x250, FirstThunk=0x230
+        struct.pack_into("<IIIII", pe_buf, 0x200, 0x230, 0, 0, 0x250, 0x230)
+        # Thunk at 0x230 pointing to IMAGE_IMPORT_BY_NAME at 0x260
+        struct.pack_into("<Q", pe_buf, 0x230, 0x260)
+        # IMAGE_IMPORT_BY_NAME at 0x260 with non-zero high byte in Hint (0x0125 -> \x25\x01)
+        pe_buf[0x260:0x269] = b"\x25\x01malloc\x00"
+        pe_dirty_path = tmp_path / "dirty_hint.dll"
+        pe_dirty_path.write_bytes(bytes(pe_buf))
+        res_pe_dirty = v.static_audit_binary(str(pe_dirty_path))
+        assert res_pe_dirty["dynamic_allocations_detected"] == 1
+        assert res_pe_dirty["heap_allocators_imported"] == ["malloc"]
+
+        # 6. Verify parity between native Rust cache kernel and Python fallback at 50,000,000 refs (< 0.05% LLd miss rate)
+        rust_kernel = v.build_or_load_rust_kernel()
+        rec_nat = None
+        if rust_kernel is not None:
+            out_native = tmp_path / "native_receipts.json"
+            rec_nat = v.verify_bcm2712_arena(num_references=50_000_000, output_path=str(out_native))
         monkeypatch.setattr(v, "build_or_load_rust_kernel", lambda: None)
         out_json = tmp_path / "fallback_receipts.json"
         receipts = v.verify_bcm2712_arena(num_references=50_000_000, output_path=str(out_json))
         assert receipts["summary"]["all_cache_targets_passed"] is True
         assert receipts["summary"]["all_allocator_audits_passed"] is True
         assert receipts["arenas"]["triad_core"]["lld_miss_rate_pct"] < 0.05
+        if rec_nat is not None:
+            assert receipts["arenas"]["triad_core"]["l3"]["misses"] == rec_nat["arenas"]["triad_core"]["l3"]["misses"] == 16384
+            assert receipts["arenas"]["triad_core"]["lld_miss_rate_pct"] == rec_nat["arenas"]["triad_core"]["lld_miss_rate_pct"]
+            assert abs(receipts["arenas"]["triad_core"]["l1d"]["hit_rate_pct"] - rec_nat["arenas"]["triad_core"]["l1d"]["hit_rate_pct"]) < 0.2
+            assert abs(receipts["arenas"]["triad_core"]["l2"]["hit_rate_pct"] - rec_nat["arenas"]["triad_core"]["l2"]["hit_rate_pct"]) < 1.5
+
+
+
 
 

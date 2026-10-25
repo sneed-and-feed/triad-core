@@ -39,5 +39,6 @@ where = ["."]
 include = ["triad_core*"]
 
 [tool.pytest.ini_options]
+pythonpath = ["."]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
