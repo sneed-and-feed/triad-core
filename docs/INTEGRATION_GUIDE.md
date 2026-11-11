@@ -1,12 +1,12 @@
-# Stealth Integration Guide
+# Domain-Native C-ABI, Rust `#![no_std]` & Python Integration Guide
 
-This guide details how to integrate `sneed-and-feed/triad-core` (`v0.1.0`) into enterprise, defense, industrial, and high-frequency trading infrastructure as an innocuous high-performance numerical utility while transparently leveraging the full high-assurance operator suite.
+This guide details how to integrate `sneed-and-feed/triad-core` (`v0.1.0`) into embedded, industrial, scientific, and low-latency quantitative infrastructure using either canonical operator names or domain-native C-ABI and Python aliases.
 
 ---
 
-## 1. Architectural Philosophy: The Universal Functor
+## 1. Architectural Overview: The Universal Functor
 
-`triad-core` unifies six computational domains through category-theoretic functors. Rather than deploying disparate mathematical kernels for computer vision, robotics, quantitative finance, structural mechanics, geophysics, and plasma physics, a single fixed SRAM arena (`TriadUniversalArena`) evaluates all six domains:
+`triad-core` unifies six computational domains through a shared proof-carrying operator suite. Rather than maintaining separate numerical kernels for EO/IR tracking, contact robotics, Level-3 market microstructure, structural topology optimization, seismic early warning, and plasma physics, a single fixed SRAM arena (`TriadUniversalArena`) evaluates all six verticals:
 
 ```math
 \mathcal{F} \colon \mathbf{TriadArena} \longrightarrow \mathbf{DomainVertical}
@@ -18,15 +18,15 @@ The underlying state vector $v$ on the unit sphere satisfies exact norm conserva
 \lVert v \rVert = 1.000000000000000
 ```
 
-Across all six verticals, the core operators maintain identical mathematical properties. In environments where specialized project designations may trigger organizational friction or disclosure concerns, `triad-core` exposes standard domain-native aliases in both C-ABI and Python interfaces.
+Across all six verticals, `triad-core` exports both canonical mathematical symbols and ergonomic domain-native API aliases across its ANSI C header (`rust/triad_core_rs/include/triad_core.h`), `#![no_std]` Rust crate, and zero-copy Python bindings.
 
 ---
 
-## 2. Canonical vs. Stealth Operator Mappings
+## 2. Canonical vs. Domain-Native Operator Mappings
 
-The table below summarizes the formal DarkSnail operators alongside their standard stealth domain aliases and physical invariants.
+The table below summarizes the six core primitives alongside their domain-native API aliases and machine-checked invariants (`formalization/TriadCore.lean`).
 
-| Primitive Index | Canonical Operator | Stealth Domain-Native Alias | Invariant Bound |
+| Primitive Index | Canonical Operator | Domain-Native Alias | Invariant Bound |
 | :--- | :--- | :--- | :--- |
 | 1 | `skew_triad_step_f32` | `so_skew_tiebreaker_f32` | Deterministic tie-break |
 | 2 | `slow_fast_cascade_k16_f32` | `spherical_cascade_integrator_f32` | Zero radial energy growth |
@@ -37,33 +37,33 @@ The table below summarizes the formal DarkSnail operators alongside their standa
 
 ---
 
-## 3. Mathematical Foundations of Stealth Aliases
+## 3. Mathematical Specifications of the Six Primitives
 
 ### A. Bilinear Skew Tie-Breaker (`so_skew_tiebreaker_f32`)
 
-In standard state estimation, competing hypothesis vectors frequently collide in symmetric readout modes. The operator:
+In multi-hypothesis state estimation, competing candidate vectors frequently collide in symmetric readout modes. The skew-symmetric bilinear triad operator:
 
 ```math
 B_{W,k}(u, v) = \sum_{i=1}^C \sum_{j=1}^C u_i v_j (W_{i,j,k} - W_{i,k,j})
 ```
 
-induces an exact anti-symmetric margin between competing states $c_1, c_2$:
+induces an exact antisymmetric margin between competing states $c_1, c_2$:
 
 ```math
 \Delta \ell = 2 \beta \alpha (W_{i_0, c_2, c_1} - W_{i_0, c_1, c_2})
 ```
 
-This guarantees deterministic collision resolution without stochastic sampling.
+guaranteeing deterministic collision resolution without stochastic tie-breaking.
 
 ### B. Spherical Cascade Integrator (`spherical_cascade_integrator_f32`)
 
-For multi-rate dynamical systems, a 16-step unrolled Euler retraction cascade ensures radial stability:
+For multi-rate dynamical systems, a 16-step unrolled tangent retraction cascade enforces pointwise orthogonality:
 
 ```math
 \langle v, B_W(u, v) \rangle = 0
 ```
 
-Radial drift remains identically zero across arbitrary integration horizons.
+maintaining zero radial drift across arbitrary integration horizons.
 
 ### C. Cayley Attitude Update (`cayley_attitude_update_f32`)
 
@@ -79,39 +79,39 @@ satisfies exact orthogonality:
 R(\Omega)^\top R(\Omega) = I
 ```
 
-This preserves Euclidean norm $\lVert R(\Omega) x \rVert^2 = \lVert x \rVert^2$ with zero numerical drift.
+preserving the Euclidean norm $\lVert R(\Omega) x \rVert^2 = \lVert x \rVert^2$ without iterative re-orthogonalization.
 
 ### D. Morse Innovation Gate (`morse_innovation_gate_f32`)
 
-Transient sensor washouts and high-frequency outliers are filtered using a 3-point discrete Morse condition:
+Transient sensor washouts and single-sample outliers are filtered using a 3-point discrete Morse condition:
 
 ```math
 \Delta_- x_t \cdot \Delta_+ x_t > 0
 ```
 
-combined with a 256-sample strided stack Median Absolute Deviation (MAD) floor:
+paired with a 256-sample strided stack Median Absolute Deviation (MAD) floor:
 
 ```math
 \mathrm{MAD} = 1.4826 \cdot \mathrm{median}\left(\lvert x_i - \mathrm{median}(x) \rvert\right)
 ```
 
-When an impulse exceeds $3 \times \mathrm{MAD}$, the sample is causally deferred for one time step, eliminating false triggers while preserving genuine step onsets.
+When an impulse exceeds $3 \times \mathrm{MAD}$, the sample is causally deferred for one step, rejecting isolated glitches while preserving sustained step maneuvers.
 
 ### E. Anisotropic Stiffness Rotor (`anisotropic_stiffness_rotor_f32`)
 
-The 6-dimensional Kelvin-Mandel representation maps the 4th-order elastic stiffness tensor into a symmetric matrix:
+The 6-dimensional Kelvin-Mandel representation maps the 4th-order elastic stiffness tensor into a symmetric $6 \times 6$ matrix rotated via:
 
 ```math
 C' = Q C Q^\top, \quad Q \in \mathrm{SO}(6)
 ```
 
-The tensor trace satisfies:
+conserving tensor trace to machine precision:
 
 ```math
 \lvert \mathrm{Tr}(C') - \mathrm{Tr}(C) \rvert \le 1.14 \times 10^{-13}
 ```
 
-preserving elastic strain energy and strict positive-definiteness across coordinate transformations.
+while preserving elastic strain energy and strict positive-definiteness across coordinate transformations.
 
 ### F. Rigid Contact Coboundary Solver (`rigid_contact_coboundary_solver_f32`)
 
@@ -127,7 +127,7 @@ while preserving unconstrained tangential slip degrees of freedom.
 
 ## 4. C / C++ Production Integration
 
-The native shared library (`triad_core_rs.dll`, `libtriad_core_rs.so`, or `libtriad_core_rs.dylib`) requires zero dynamic heap allocations. Memory is pre-allocated within a 64-byte aligned static arena buffer.
+The native shared library (`triad_core_rs.dll`, `libtriad_core_rs.so`, or `libtriad_core_rs.dylib`) executes with zero dynamic heap allocations inside a 64-byte aligned static arena buffer.
 
 ### Header Inclusion
 
@@ -153,7 +153,7 @@ int main(void) {
         v[i] = (i == 0) ? 1.0f : 0.0f;
     }
 
-    /* 3. Invoke stealth domain-native tie-breaker */
+    /* 3. Invoke domain-native tie-breaker */
     so_skew_tiebreaker_f32(u, v, NULL, 16, 0.016f, v_step);
 
     /* 4. Evaluate 16-step cascade */
@@ -161,7 +161,7 @@ int main(void) {
 
     /* 5. Verify invariant preservation */
     if (radial_drift == 0.0f) {
-        printf("Integrity confirmed: Norm drift = %.3e\\n", radial_drift);
+        printf("Integrity confirmed: Norm drift = %.3e\n", radial_drift);
     }
 
     return 0;
@@ -172,13 +172,13 @@ int main(void) {
 
 ## 5. Python Integration via Zero-Copy FFI
 
-In Python environments, developers can import `TriadCoreEngine` directly. All methods support both canonical and stealth naming conventions:
+In Python environments, `TriadCoreEngine` exposes both canonical and domain-native method names:
 
 ```python
 import numpy as np
 from triad_core.operators import TriadCoreEngine
 
-# Initialize the engine (supports both canonical and stealth domain aliases)
+# Initialize the engine (supports both canonical and domain-native aliases)
 engine = TriadCoreEngine()
 
 # Dimension C = 16
@@ -187,17 +187,17 @@ u = np.full(dim, 1.0 / np.sqrt(dim), dtype=np.float32)
 v = np.zeros(dim, dtype=np.float32)
 v[0] = 1.0
 
-# 1. Stealth Bilinear Tie-Breaker
+# 1. Bilinear Tie-Breaker
 v_next = engine.so_skew_tiebreaker(u, v, dt=0.016)
 
-# 2. Stealth Spherical Cascade
+# 2. Spherical Cascade Integrator
 v_cascade = engine.spherical_cascade_integrator(u, v_next)
 
-# 3. Stealth Morse Innovation Gate
+# 3. Morse Innovation Gate
 history_buffer = np.sin(np.linspace(0, 10, 256), dtype=np.float32)
 gate_res = engine.morse_innovation_gate(history_buffer)
 
-# 4. Stealth Cayley Attitude Rotor
+# 4. Cayley Attitude Rotor
 v_rot, rotor_updated = engine.cayley_attitude_update(0, 1, 0.016, v_cascade)
 
 # 5. Verify formal theorem bounds
@@ -210,7 +210,7 @@ print("All 11 formal theorem numerical bounds confirmed.")
 
 ## 6. Bare-Metal & Embedded RTOS `#![no_std]` Deployment
 
-Because `triad_core_rs` is built with `#![no_std]` and zero dependencies, it compiles directly for bare-metal ARM Cortex-A76 microcontrollers, RISC-V cores, and WebAssembly runtimes:
+Because `triad_core_rs` is built with `#![no_std]` and zero external dependencies, it compiles directly for bare-metal ARM Cortex-A76 processors, RISC-V cores, and WebAssembly runtimes:
 
 ```toml
 [dependencies]
@@ -236,16 +236,10 @@ pub fn control_step(u: &[f32; 16], v: &mut [f32; 16]) -> f32 {
 
 ## 7. Broadcom BCM2712 Cache Placement Strategy
 
-The memory layout of `TriadUniversalArena` is engineered to fit within the 2.0 MB L3 SRAM cache of the Broadcom BCM2712 (Raspberry Pi 5):
+The memory layout of `TriadUniversalArena` fits entirely within the 2.0 MB shared L3 SRAM cache of the Broadcom BCM2712 (Raspberry Pi 5):
 
-- **L1 Data Cache (64 KB)**: Contains active working vectors ($u$, $v$, and local SIMD registers).
-- **L2 Cache (512 KB)**: Contains intermediate tensor projections and the 256-sample Morse stack.
+- **L1 Data Cache (64 KB)**: Holds active working vectors ($u$, $v$, and local SIMD registers).
+- **L2 Cache (512 KB)**: Holds intermediate tensor projections and the 256-sample Morse stack.
 - **L3 Cache (2.0 MB)**: Accommodates the entire static arena ($894,912\text{ Bytes} \approx 0.85\text{ MB}$).
 
-Because the entire memory footprint resides in on-chip SRAM, cold memory misses to external LPDDR4X SDRAM are completely eliminated, achieving an empirical Last-Level Cache miss rate of $0.0328\%$, well below the $0.05\%$ operational threshold.
-
----
-
-## 8. Summary
-
-By decoupling formal mathematical proofs from outward naming conventions, `sneed-and-feed/triad-core` offers drop-in compatibility across mission-critical software pipelines, delivering verified numerical guarantees under innocuous nomenclature.
+Keeping the complete working footprint inside on-chip SRAM eliminates steady-state capacity evictions to external LPDDR4X SDRAM, achieving an empirical Last-Level Cache miss rate of $0.0328\%$ (`< 0.05%` target).

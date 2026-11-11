@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+message: "If you use triad-core in your research or engineering systems, please cite it using the metadata below."
+title: "triad-core: Universal Proof-Carrying Triad SIMD Kernel"
+version: 0.1.0
+date-released: 2026-10-25
+authors:
+  - family-names: "Cohen"
+    given-names: "Noah"
+license: CC0-1.0
+repository-code: "https://github.com/sneed-and-feed/triad-core"
+url: "https://github.com/sneed-and-feed/triad-core"
+keywords:
+  - lean4
+  - formal-verification
+  - no-std
+  - simd
+  - lie-algebra
+  - discrete-morse-theory
+  - cellular-sheaves

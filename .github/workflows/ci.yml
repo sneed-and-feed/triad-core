@@ -25,7 +25,7 @@ jobs:
 
       - name: Run GFM/KaTeX Math Linter
         run: |
-          python scripts/audit_gfm_math.py README.md docs/STEALTH_INTEGRATION_GUIDE.md
+          python scripts/audit_gfm_math.py README.md docs/INTEGRATION_GUIDE.md
 
   rust-simd-tests:
     name: Rust #![no_std] SIMD Arena & C-ABI

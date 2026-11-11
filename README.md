@@ -1,12 +1,12 @@
 # triad-core: Universal Proof-Carrying Triad SIMD Kernel
 
-[![CI Matrix](https://img.shields.io/badge/CI-Passing-00ff9d.svg?style=flat-square)](#)
-[![Lean 4 Formalization](https://img.shields.io/badge/Lean_4-0_sorry_0_warnings-00f0ff.svg?style=flat-square)](#)
-[![Rust no_std](https://img.shields.io/badge/Rust-%23!%5Bno__std%5D_SIMD-b844ff.svg?style=flat-square)](#)
-[![BCM2712 Cache](https://img.shields.io/badge/BCM2712_LLd_Miss-0.0328%25_(%3C0.05%25)-ffb800.svg?style=flat-square)](#)
+[![CI Matrix](https://github.com/sneed-and-feed/triad-core/actions/workflows/ci.yml/badge.svg)](https://github.com/sneed-and-feed/triad-core/actions/workflows/ci.yml)
+[![Lean 4 Formalization](https://img.shields.io/badge/Lean_4-0_sorry_0_warnings-00f0ff.svg?style=flat-square)](formalization/TriadCore.lean)
+[![Rust no_std](https://img.shields.io/badge/Rust-%23!%5Bno__std%5D_SIMD-b844ff.svg?style=flat-square)](rust/triad_core_rs)
+[![BCM2712 Cache](https://img.shields.io/badge/BCM2712_LLd_Miss-0.0328%25_(%3C0.05%25)-ffb800.svg?style=flat-square)](results/bcm2712_cache_receipts.json)
 [![License](https://img.shields.io/badge/License-CC0--1.0_Universal-lightgrey.svg?style=flat-square)](LICENSE)
 
-A standalone, zero-dependency, proof-carrying **Lean 4 + `#![no_std]` Rust SIMD (`AVX2`/`NEON`/`WASM32`) + C-ABI / Python FFI library** that unifies the six core mathematical primitives shared across the nine-repository DarkSnail constellation (`projectdarksnail`, `stylo`, `robosnail`, `lob-triad`, `toposnail`, `quakesnail`, `g3vm`, `bmhd`, `oatse`), complete with stealth domain-native API aliases, a Broadcom BCM2712 cache-hierarchy verifier, a 6-vertical equivalence benchmark, and a zero-install 6-vertical WebGL2 studio.
+A standalone, zero-dependency, proof-carrying **Lean 4 + `#![no_std]` Rust SIMD (`AVX2`/`NEON`/`WASM32`) + C-ABI / Python FFI library** that unifies the six core mathematical primitives shared across the 12-repository [**Project DarkSnail**](https://github.com/sneed-and-feed/projectdarksnail) ecosystem (`projectdarksnail`, `triad-core`, `stylo`, `robosnail`, `lob-triad`, `toposnail`, `quakesnail`, `g3vm`, `bmhd`, `oatse`, `astrosnail`, `cellsnail`), complete with domain-native API aliases, a Broadcom BCM2712 cache-hierarchy verifier, a 6-vertical equivalence benchmark, and a zero-install 6-vertical WebGL2 studio.
 
 ---
 
@@ -14,41 +14,42 @@ A standalone, zero-dependency, proof-carrying **Lean 4 + `#![no_std]` Rust SIMD 
 
 - [1. Executive Summary](#1-executive-summary)
 - [2. Mathematical Foundations and Formal Verification](#2-mathematical-foundations-and-formal-verification)
-- [3. The Six Core Primitives and Stealth Domain Aliases](#3-the-six-core-primitives-and-stealth-domain-aliases)
+- [3. The Six Core Primitives and Domain-Native Aliases](#3-the-six-core-primitives-and-domain-native-aliases)
 - [4. Broadcom BCM2712 Hardware Cache Geometry](#4-broadcom-bcm2712-hardware-cache-geometry)
 - [5. Quad-SIMD Architecture (AVX2, NEON, WASM32, Scalar)](#5-quad-simd-architecture-avx2-neon-wasm32-scalar)
 - [6. Six-Vertical Equivalence Benchmark](#6-six-vertical-equivalence-benchmark)
 - [7. Zero-Install WebGL2 Studio Workstation](#7-zero-install-webgl2-studio-workstation)
-- [8. Stealth Integration and Code Examples](#8-stealth-integration-and-code-examples)
+- [8. Domain-Native Integration and Code Examples](#8-domain-native-integration-and-code-examples)
 - [9. Repository Structure and Verification Suite](#9-repository-structure-and-verification-suite)
-- [10. License](#10-license)
+- [10. Citation](#10-citation)
+- [11. License](#11-license)
 
 ---
 
 ## 1. Executive Summary
 
-`sneed-and-feed/triad-core` (`v0.1.0`, `CC0-1.0` Public Domain) establishes a universal functorial bridge across six distinct engineering and physical domains:
+`sneed-and-feed/triad-core` (`v0.1.0`, `CC0-1.0` Public Domain) establishes a universal functorial bridge across distinct engineering and scientific verticals:
 
-1. **EO/IR Sensor Tracking (`stylo`)**: Optical glint rejection and zero track-ID swapping.
+1. **EO/IR Sensor Tracking & Astrometry (`stylo` / `astrosnail`)**: Optical glint and cosmic-ray rejection with zero track-ID swapping.
 2. **Contact Robotics (`robosnail`)**: $\mathrm{SE}(2)$ cellular sheaf contact-graph propagation and unilateral non-penetration.
 3. **L3 Limit Order Book Microstructure (`lob-triad`)**: Quote-stuffing flicker suppression and deterministic lead-lag tie-breaking.
-4. **Bionic Topology Optimization (`toposnail` / `g3vm`)**: $\mathrm{SO}(6)$ Kelvin-Mandel stiffness tensor rotation and Michell frame compliance.
-5. **Seismic Earthquake Early Warning (`quakesnail`)**: 3-point discrete Morse innovation gating and single-sample causal deferral.
+4. **Bionic Topology & Subsurface Elasticity (`toposnail` / `g3vm` / `oatse`)**: $\mathrm{SO}(6)$ Kelvin-Mandel stiffness tensor rotation and Michell frame compliance.
+5. **Seismic & Genomic Impulse Triage (`quakesnail` / `cellsnail`)**: 3-point discrete Morse innovation gating, boundary-aware spike preservation, and single-sample causal deferral.
 6. **Magnetohydrodynamics and Fusion (`bmhd`)**: Non-axisymmetric stellarator magnetic flux tangency and Taylor-Woltjer Beltrami relaxation.
 
-Rather than maintaining separate, disparate numerical libraries for each domain, `triad-core` demonstrates that all six domains are isomorphic projections of a single underlying fixed SRAM kernel:
+Rather than maintaining separate numerical kernels for each vertical, `triad-core` demonstrates that all six operator families execute inside a single fixed SRAM arena:
 
 ```math
 \mathcal{F} \colon \mathbf{TriadArena} \longrightarrow \mathbf{DomainVertical}
 ```
 
-Every numerical operator is paired with a machine-checked proof in `formalization/TriadCore.lean` (`0 sorry`, `0` compiler warnings), establishing zero radial drift, exact energy conservation, and deterministic tie-breaking under finite-precision arithmetic.
+Every numerical operator is paired with a machine-checked proof in [`formalization/TriadCore.lean`](formalization/TriadCore.lean) (`0 sorry`, `0` compiler warnings), establishing zero radial drift, exact energy conservation, and deterministic tie-breaking under finite-precision arithmetic.
 
 ---
 
 ## 2. Mathematical Foundations and Formal Verification
 
-The formalization in `formalization/TriadCore.lean` contains machine-checked proofs for Theorems 2.1 through 2.11:
+The formalization in [`formalization/TriadCore.lean`](formalization/TriadCore.lean) contains machine-checked proofs for Theorems 2.1 through 2.11:
 
 | Theorem | Name | Mathematical Statement | Machine-Checked Bound |
 | :--- | :--- | :--- | :--- |
@@ -60,16 +61,16 @@ The formalization in `formalization/TriadCore.lean` contains machine-checked pro
 | **Thm 2.6** | $\mathrm{SO}(6)$ Stiffness Trace Conservation | $\lvert \mathrm{Tr}(Q C Q^\top) - \mathrm{Tr}(C) \rvert \le 1.14 \times 10^{-13}$ | Machine precision trace bound |
 | **Thm 2.7** | 3-Point Discrete Morse Gate | $\Delta_- v \cdot \Delta_+ v > 0$ with stack MAD floor | 100% glare and washout rejection |
 | **Thm 2.8** | 3D Ideal MHD Force Balance | $\mathbf{J} \times \mathbf{B} = \nabla p \iff \langle \mathbf{B}, B_W(\mathbf{J}, \mathbf{B}) \rangle = 0$ | Pointwise flux tangency $\le 1.0 \times 10^{-8}$ |
-| **Thm 2.9** | Relaxed-Flow MRxMHD Jump Law | $\llbracket p + \frac{1}{2}(1 + M^2) B^2 \rrbracket = 0$ | Exact Bernoulli conservation |
+| **Thm 2.9** | Relaxed-Flow MRxMHD Jump Law | $\lbrack\!\lbrack p + \tfrac{1}{2}(1 + M^2) B^2 \rbrack\!\rbrack = 0$ | Exact Bernoulli conservation |
 | **Thm 2.10a** | Cayley Rank-2 Orthogonality | $R(\Omega)^\top R(\Omega) = I, \; \lVert R(\Omega) x \rVert = \lVert x \rVert$ | $0.000\times 10^0$ Euclidean drift |
 | **Thm 2.10b** | Contact Sheaf Non-Penetration | $\delta v_n(e) \ge 0$ | Zero normal interpenetration |
 | **Thm 2.11** | SRAM Arena Disjointness | Pairwise cacheline disjointness | Bound $\le 1,258,291\text{ B} < 2.0\text{ MB}$ |
 
 ---
 
-## 3. The Six Core Primitives and Stealth Domain Aliases
+## 3. The Six Core Primitives and Domain-Native Aliases
 
-`triad-core` implements six primitive mathematical operators in `#![no_std]` Rust SIMD with zero runtime heap allocations. In high-assurance environments where specialized project naming is discouraged, the library exposes standard domain-native aliases in both C-ABI symbols and Python bindings:
+`triad-core` implements six primitive mathematical operators in `#![no_std]` Rust SIMD with zero runtime heap allocations. Alongside canonical symbols, the library exposes standard domain-native aliases in both C-ABI exports and Python bindings:
 
 ```math
 B_{W,k}(u, v) = \sum_{i=1}^C \sum_{j=1}^C u_i v_j (W_{i,j,k} - W_{i,k,j})
@@ -79,7 +80,7 @@ B_{W,k}(u, v) = \sum_{i=1}^C \sum_{j=1}^C u_i v_j (W_{i,j,k} - W_{i,k,j})
 R(\Omega) = \left(I - \frac{1}{2}\Omega\right)^{-1} \left(I + \frac{1}{2}\Omega\right), \quad \Omega = u v^\top - v u^\top \in \mathfrak{so}(n)
 ```
 
-| # | Canonical Symbol | Stealth Domain-Native Alias | Physical Operator Description |
+| # | Canonical Symbol | Domain-Native Alias | Physical Operator Description |
 | :--- | :--- | :--- | :--- |
 | 1 | `skew_triad_step_f32` | `so_skew_tiebreaker_f32` | $\mathfrak{so}(C)$ Bilinear triad $B_W(u, v)$ + spherical retraction |
 | 2 | `slow_fast_cascade_k16_f32` | `spherical_cascade_integrator_f32` | 16-step unrolled cascade with $0.000\times 10^0$ radial drift |
@@ -94,7 +95,7 @@ R(\Omega) = \left(I - \frac{1}{2}\Omega\right)^{-1} \left(I + \frac{1}{2}\Omega\
 
 The memory layout of `TriadUniversalArena` is statically engineered for the Broadcom BCM2712 SoC (Raspberry Pi 5, quad ARM Cortex-A76 at 2.4 GHz).
 
-```
+```text
 +-------------------------------------------------------------------------+
 |                  BROADCOM BCM2712 MEMORY HIERARCHY                      |
 +-------------------------------------------------------------------------+
@@ -132,9 +133,9 @@ A cycle-accurate cache hierarchy simulation over $50,000,000$ consecutive memory
 
 ## 6. Six-Vertical Equivalence Benchmark
 
-The compiled `TriadUniversalArena` was evaluated across all six canonical domains under Mode B blind noise ($\mathrm{SNR} = 20\text{ dB}$, $15\%$ transient glint washouts). Results are archived in `results/triad_core_audit_summary.json`:
+The compiled `TriadUniversalArena` was evaluated across all six canonical domains under Mode B blind noise ($\mathrm{SNR} = 20\text{ dB}$, $15\%$ transient glint washouts). Results are archived in [`results/triad_core_audit_summary.json`](results/triad_core_audit_summary.json):
 
-```
+```text
 ================================================================================
 TRIAD-CORE 6-VERTICAL EQUIVALENCE BENCHMARK SUMMARY
 ================================================================================
@@ -153,7 +154,7 @@ OVERALL STATUS: ALL 6 VERTICALS PASS AT OR EXCEEDING SPOKE REFERENCE PRECISION
 
 ## 7. Zero-Install WebGL2 Studio Workstation
 
-`studio/triad_core_studio.html` provides an interactive, zero-dependency, dark-mode engineering workstation running entirely client-side:
+[`studio/triad_core_studio.html`](studio/triad_core_studio.html) provides an interactive, zero-dependency, dark-mode engineering workstation running entirely client-side:
 
 - **Universal Functor Switchboard**: Real-time switching across all six domain verticals at 60 to 240 Hz.
 - **Synchronized 4-Quad Layout**:
@@ -162,13 +163,15 @@ OVERALL STATUS: ALL 6 VERTICALS PASS AT OR EXCEEDING SPOKE REFERENCE PRECISION
   - Viewport 3: Innovation and 3-Point Morse Spectrum (stack MAD envelope and causal deferral).
   - Viewport 4: Functor Manifold Projection ($\mathfrak{so}(C)$ Lie algebra matrix).
 - **Telemetry Sidebar**: Live status cards for Theorems 2.1 through 2.11 and cycle-accurate BCM2712 cache visualizer.
-- **Single-Click Export**: Download cryptographically verified `.json` audit receipts and clean ANSI C `.h` headers directly from the browser.
+- **Single-Click Export**: Download `.json` audit receipts and clean ANSI C `.h` headers directly from the browser.
 
-To launch, open `studio/triad_core_studio.html` in any modern browser via `file://`.
+To launch, open [`studio/triad_core_studio.html`](studio/triad_core_studio.html) in any modern browser via `file://`.
 
 ---
 
-## 8. Stealth Integration and Code Examples
+## 8. Domain-Native Integration and Code Examples
+
+See [`docs/INTEGRATION_GUIDE.md`](docs/INTEGRATION_GUIDE.md) for full C99/C11, `#![no_std]` Rust, and Python FFI deployment patterns.
 
 ### Python Integration
 
@@ -184,7 +187,7 @@ u = np.full(dim, 1.0 / np.sqrt(dim), dtype=np.float32)
 v = np.zeros(dim, dtype=np.float32)
 v[0] = 1.0
 
-# Stealth domain-native calls
+# Domain-native operator calls
 v_step = engine.so_skew_tiebreaker(u, v, dt=0.016)
 v_retracted = engine.spherical_cascade_integrator(u, v_step)
 
@@ -215,7 +218,7 @@ int main(void) {
         v[i] = (i == 0) ? 1.0f : 0.0f;
     }
 
-    /* Execute stealth operators */
+    /* Execute domain-native operators */
     so_skew_tiebreaker_f32(u, v, NULL, 16, 0.016f, v_step);
     spherical_cascade_integrator_f32(u, v_step, NULL, 16, 0.016f, v_out, &radial_drift);
 
@@ -227,15 +230,15 @@ int main(void) {
 
 ## 9. Repository Structure and Verification Suite
 
-```
+```text
 triad-core/
 ├── .github/
 │   └── workflows/
 │       └── ci.yml                     # Full GitHub Actions CI matrix
 ├── docs/
-│   └── STEALTH_INTEGRATION_GUIDE.md   # Stealth embedding manual
+│   └── INTEGRATION_GUIDE.md           # C-ABI, Rust #![no_std] & Python integration manual
 ├── formalization/
-│   └── TriadCore.lean                 # Lean 4 formalization (Thms 2.1-2.11)
+│   └── TriadCore.lean                 # Lean 4 formalization (Thms 2.1-2.11, 0 sorry)
 ├── results/
 │   ├── bcm2712_cache_receipts.json    # 50M ref cachegrind simulation
 │   └── triad_core_audit_summary.json  # 6-vertical benchmark results
@@ -243,11 +246,11 @@ triad-core/
 │   └── triad_core_rs/
 │       ├── Cargo.toml                 # #![no_std] crate definition
 │       ├── include/
-│       │   └── triad_core.h           # ANSI C header with stealth aliases
+│       │   └── triad_core.h           # ANSI C header with domain-native aliases
 │       └── src/
 │           └── lib.rs                 # SIMD arena and C-ABI export symbols
 ├── scripts/
-│   ├── audit_gfm_math.py              # 21-rule GFM/KaTeX math linter
+│   ├── audit_gfm_math.py              # GitHub-Flavored Markdown & KaTeX math linter
 │   └── verify_bcm2712_arena.py        # BCM2712 cache verifier and symbol audit
 ├── studio/
 │   └── triad_core_studio.html         # 6-vertical WebGL2 studio workstation
@@ -258,6 +261,7 @@ triad-core/
 │   ├── _native.py                     # Zero-copy ctypes C-ABI loader
 │   ├── benchmark.py                   # 6-vertical equivalence runner
 │   └── operators.py                   # Python reference oracle and theorem checker
+├── CITATION.cff                       # Citation metadata
 ├── pyproject.toml                     # Python packaging configuration
 ├── README.md                          # Comprehensive documentation
 └── LICENSE                            # CC0-1.0 Universal Public Domain Dedication
@@ -267,7 +271,7 @@ triad-core/
 
 1. **GFM/KaTeX Math Compliance Audit**:
    ```bash
-   python scripts/audit_gfm_math.py README.md docs/STEALTH_INTEGRATION_GUIDE.md
+   python scripts/audit_gfm_math.py README.md docs/INTEGRATION_GUIDE.md
    ```
 2. **Rust SIMD Tests**:
    ```bash
@@ -284,6 +288,20 @@ triad-core/
 
 ---
 
-## 10. License
+## 10. Citation
+
+```bibtex
+@software{triad_core_2026,
+  author       = {Cohen, Noah},
+  title        = {triad-core: Universal Proof-Carrying Triad SIMD Kernel},
+  year         = {2026},
+  version      = {0.1.0},
+  url          = {https://github.com/sneed-and-feed/triad-core}
+}
+```
+
+---
+
+## 11. License
 
 Dedicated to the public domain under the [Creative Commons CC0 1.0 Universal](LICENSE) legal code.

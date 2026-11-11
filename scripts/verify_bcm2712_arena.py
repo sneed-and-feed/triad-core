@@ -369,7 +369,7 @@ class CTypesTelemetry(ctypes.Structure):
 
 
 def build_or_load_rust_kernel() -> Optional[Any]:
-    cache_dir = os.path.abspath(".agents/teamwork/agent-3-audit-cache")
+    cache_dir = os.path.abspath("target/bcm2712_cache_sim")
     os.makedirs(cache_dir, exist_ok=True)
     if sys.platform == "win32":
         lib_name = "bcm2712_triad_cache_sim.dll"

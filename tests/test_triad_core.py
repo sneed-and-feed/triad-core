@@ -472,7 +472,7 @@ class TestEdgeCasesAndStealthIntegration:
     """Tests boundary inputs, 64D triad steps, W=None parity, and documented stealth workflows."""
 
     def test_stealth_integration_workflow_64d(self):
-        """Verifies the 64D stealth domain-native workflow from README.md & STEALTH_INTEGRATION_GUIDE.md."""
+        """Verifies the 64D domain-native workflow from README.md & INTEGRATION_GUIDE.md."""
         from triad_core.operators import TriadCoreEngine
 
         engine = TriadCoreEngine()
